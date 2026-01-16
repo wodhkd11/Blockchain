@@ -2,15 +2,15 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::block::modelStruct::*;
+use crate::block::model_struct::*;
 use sha2::{Sha256, Digest};
 
 impl TransactionData{
-    pub fn new(sender: [u8;20], receiver: [u8; 20], amount: u64, nonce: u64) -> Self{
+    pub fn new(sender: [u8;20], receiver: [u8; 20], payload: Vec<u8>, nonce: u64) -> Self{
         let mut tx = Self{
             sender,
             receiver,
-            amount,
+            payload,
             nonce,
             hash: [0u8; 32],
         };
@@ -22,7 +22,7 @@ impl TransactionData{
         let mut hasher = Sha256::new();
         hasher.update(&self.sender);
         hasher.update(&self.receiver);
-        hasher.update(&self.amount.to_be_bytes());
+        hasher.update(&self.payload);
         hasher.update(&self.nonce.to_be_bytes());
 
         let result = hasher.finalize();

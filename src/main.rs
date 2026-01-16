@@ -1,6 +1,6 @@
 mod network;
 mod block; // 기존 블록 모듈
-
+mod crypto;
 use network::node::Node;
 use std::{env, net::SocketAddr, sync::Arc};
 use tokio::time::{sleep, Duration};

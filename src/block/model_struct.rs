@@ -7,7 +7,7 @@ pub type Hash = [u8; 32];
 pub struct TransactionData{
     pub sender: Address,
     pub receiver: Address,
-    pub amount: u64,
+    pub payload: Vec<u8>,
     pub nonce: u64, // 이중지불 방지용 트랜잭션 순서
     pub hash: Hash,
 }
