@@ -1,16 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+use crate::block::transaction::TransactionData;
+
 pub type Address = [u8; 20];
 pub type Hash = [u8; 32];
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TransactionData{
-    pub sender: Address,
-    pub receiver: Address,
-    pub payload: Vec<u8>,
-    pub nonce: u64, // 이중지불 방지용 트랜잭션 순서
-    pub hash: Hash,
-}
 
 pub type Signature = Vec<u8>;
 

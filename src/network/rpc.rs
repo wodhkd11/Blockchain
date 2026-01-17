@@ -1,18 +1,33 @@
 use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
+use reqwest::Method;
+use serde::Deserialize;
+use serde_with::serde_as;
+use sha3::{Digest, Keccak256};
+use tower_http::cors::{Any, CorsLayer};
 use std::sync::Arc;
-use crate::{block::model_struct::{Hash, TransactionData}, network::{message::NetworkMessage, node::NodeManage}};
+use crate::{block::{model_struct::Hash, transaction::TransactionData}, network::{message::NetworkMessage, node::NodeManage}};
 
-#[derive(serde::Deserialize)]
+#[serde_as]
+#[derive(Debug, Deserialize)]
 pub struct TransactionRequest{
     pub sender: [u8; 20],
     pub receiver: [u8; 20],
+    pub value: u64,
     pub nonce: u64,
-    pub data: String,
+    pub payload: Vec<u8>,
+    #[serde_as(as = "[_; 65]")]
+    pub signature: [u8; 65],
 } // after get string, to_hex and do Transaction::New()
 
 pub async fn start_rpc_server(manager: Arc<NodeManage>, rpc_port: u16){
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::POST, Method::GET])
+        .allow_headers(Any);
+
     let app = Router::new()
         .route("/transaction", post(handle_tx_submission))
+        .layer(cors)
         .with_state(manager);
     let addr = format!("0.0.0.0:{}", rpc_port);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
@@ -29,26 +44,59 @@ async fn handle_tx_submission(
     State(manager): State<Arc<NodeManage>>,
     Json(payload): Json<TransactionRequest>,
 ) -> Result<Json<Hash>, StatusCode>{
-    let hex_data = payload.data.trim_start_matches("0x");
-    let raw_data = hex::decode(hex_data).map_err(|e|{
-        println!("[RPC]: Hex decoding failed{e}");
-        StatusCode::BAD_REQUEST
-    })?;
-    let tx = TransactionData::new(
-        payload.sender,
-        payload.receiver,
-        raw_data,
-        payload.nonce,
-    );
-    let tx_hash = tx.hash;
+    let mut hasher = Keccak256::new();
+    hasher.update(&payload.signature);
+    let sig_hash: [u8; 32] = hasher.finalize().into();
+
+    let tx = payload.to_core_data().ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let sender_address = tx.sender;
     {
         let mut state = manager.state.write().await;
-        state.mempool.insert(tx.hash, tx.clone());
-        println!("[NEW TRANSACTION] New transaction got: {:?}",tx_hash);
+        let storage = state.storage.clone();
+
+        let cur_nonce = state.global_state.get_nonce(&sender_address, &storage);
+        if tx.nonce!= cur_nonce{
+            println!("[RPC]: Nonce mismatch");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        if state.mempool.contains_key(&sig_hash){
+            return Err(StatusCode::CONFLICT);
+        }
+        state.mempool.insert(sig_hash, tx.clone());
     }
-    let msg = NetworkMessage::Transaction(tx);
+    let msg = NetworkMessage::Transaction(tx.clone());
     let manager_clone = manager.clone();
     tokio::spawn(async move{manager_clone.broadcast(msg).await;});
 
-    Ok(Json(tx_hash))
+    Ok(Json(sig_hash))
+}
+
+impl TransactionRequest{
+    pub fn to_core_data(&self) -> Option<TransactionData>{
+        if !self.verify_signature(){
+            println!("[RPC]: INVALID SIGNATURE");
+            return None;
+        }
+
+        //is signed?
+        Some(TransactionData::new(
+            self.sender,
+            self.receiver,
+            self.value,
+            self.payload.clone(),
+            self.nonce,
+            self.signature,
+        ))
+    }
+    fn verify_signature(&self) -> bool{
+        let mut v = Vec::new();
+        v.extend_from_slice(&self.sender);
+        v.extend_from_slice(&self.receiver);
+        v.extend_from_slice(&self.value.to_be_bytes());
+        v.extend_from_slice(&self.nonce.to_be_bytes());
+        v.extend_from_slice(&self.payload);
+
+        crate::crypto::signature::verify(self.sender, &self.signature, &v)
+    }
 }

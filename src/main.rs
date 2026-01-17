@@ -5,7 +5,7 @@ use network::node::Node;
 use std::{env, net::SocketAddr, sync::Arc};
 use tokio::time::{sleep, Duration};
 
-use crate::network::node::NodeManage;
+use crate::{ network::node::NodeManage};
 
 #[tokio::main]
 async fn main() {
@@ -23,15 +23,23 @@ async fn main() {
     let my_port: u16 = args[1].parse().expect("포트 번호는 숫자여야 합니다.");
     let my_addr_str = format!("127.0.0.1:{}", my_port);
 
+    let db_path = format!("data/node_{my_port}");
+
     // 3. 시드 노드 주소들 추출 (2번째 인자부터 끝까지)
     let seeds: Vec<&str> = args.iter().skip(2).map(|s| s.as_str()).collect();
 
     println!("🚀 노드 가동 준비 중...");
     println!("📍 내 주소: {}", my_addr_str);
     println!("🌱 시드 노드 목록: {:?}", seeds);
+    
+    let wallet_str =  "9a88fba688549f107c6d97f8415f8eb6b6f76f98";
+    let mut wallet: [u8; 20] = [0;20];
+    hex::decode_to_slice(wallet_str, &mut wallet).expect("");
+
+
 
     // 4. NodeManage 생성 및 실행
-    let node_manager = Arc::new(NodeManage::new(my_port, &my_addr_str));
+    let node_manager = Arc::new(NodeManage::new(my_port, &my_addr_str, wallet, &db_path));
     
     // start 함수가 내부적으로 Discovery를 수행하고 리스닝 루프를 돌립니다.
     node_manager.start(seeds).await;

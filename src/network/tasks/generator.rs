@@ -1,12 +1,12 @@
-
+/*
 use std::net::SocketAddr;
 use std::sync::Arc;
 use rand::Rng;
 use hex;
 
+use crate::block::transaction::TransactionData;
 use crate::network::node::NodeManage;
 use crate::network::message::NetworkMessage;
-use crate::block::model_struct::TransactionData;
 
 impl NodeManage{
     pub async fn start_transaction_generator(self:Arc<Self>){
@@ -16,7 +16,7 @@ impl NodeManage{
                 rng.gen_range(2..=6)
             };
             tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-            let tx = {
+            let tx:TransactionData = {
                 let mut rng = rand::thread_rng();
                 let mut sender = [0u8; 20];
                 let mut receiver = [0u8; 20];
@@ -25,8 +25,10 @@ impl NodeManage{
                 TransactionData::new(
                     sender,
                     receiver,
-                    vec![0xFF; 1024],
-                    rng.gen_range(1..100),
+                    value,
+                    nonce:0
+                    payload: vec![0xFF; 1024],
+                    signature: [0xFF;65],
                 )
             };
             let msg = NetworkMessage::Transaction(tx);
@@ -39,3 +41,4 @@ impl NodeManage{
     }
 
 }
+    */

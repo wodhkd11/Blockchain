@@ -2,25 +2,27 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use crate::block::state::GlobalBalance;
+use crate::block::{db::Storage, state::GlobalBalance};
 
 #[derive(Clone)]
 pub struct BalanceReader{
     inner: Arc<RwLock<GlobalBalance>>,
+    storage: Arc<Storage>
 }
 #[derive(Clone)]
 pub struct BalanceWriter{
     inner: Arc<RwLock<GlobalBalance>>,
+    storage: Arc<Storage>
 }
 
 //balanceReader
 impl BalanceReader{
-    pub fn new(inner: Arc<RwLock<GlobalBalance>>) -> Self{
-        Self{inner}
+    pub fn new(inner: Arc<RwLock<GlobalBalance>>, storage: Arc<Storage>) -> Self{
+        Self{inner, storage}
     }
     pub async fn get_balance(&self, address: [u8; 20]) -> u64{
-        let state = self.inner.read().await;
-        state.get_balance(&address)
+        let mut state = self.inner.write().await;
+        state.get_balance(&address, &self.storage)
     }
     pub async fn get_pending_gas(&self) -> u64{
         let state = self.inner.read().await;
@@ -29,20 +31,20 @@ impl BalanceReader{
 }
 
 impl BalanceWriter{
-    pub fn new(inner: Arc<RwLock<GlobalBalance>>) -> Self{
-        Self{inner}
+    pub fn new(inner: Arc<RwLock<GlobalBalance>>, storage: Arc<Storage>) -> Self{
+        Self{inner, storage}
     }
 
     pub async fn exc_committed_transaction(&self, from:[u8;20], to:[u8;20], amount:u64, fee:u64) -> bool{
         let mut state = self.inner.write().await;
 
-        let sender_balance = state.get_balance(&from);
-        if sender_balance < amount{return false;}
-        state.set_balance(from, sender_balance-amount);
+        let sender_balance = state.get_balance(&from, &self.storage);
+        if (sender_balance < amount) && (fee < amount) {return false;}
+        state.set_balance(from, sender_balance-amount, &self.storage);
 
         let net_amount = amount.saturating_sub(fee);
-        let receiver_cur = state.get_balance(&to);
-        state.set_balance(to, receiver_cur + net_amount);
+        let receiver_cur = state.get_balance(&to, &self.storage);
+        state.set_balance(to, receiver_cur + net_amount, &self.storage);
         state.add_gas(fee);
         true
     }
@@ -56,8 +58,8 @@ impl BalanceWriter{
             .collect();
         for (addr, share) in shares{
             let reward = (total_gas * share)/100;
-            let current = state.get_balance(&addr);
-            state.set_balance(addr,current+reward);
+            let current = state.get_balance(&addr, &self.storage);
+            state.set_balance(addr,current+reward, &self.storage);
         }
         ("[GAS]:가스비 분배 완료");
     }

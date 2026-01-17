@@ -2,35 +2,9 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::block::model_struct::*;
-use sha2::{Sha256, Digest};
+use crate::block::{model_struct::*, transaction::TransactionData};
+use sha3::{Keccak256, Digest};
 
-impl TransactionData{
-    pub fn new(sender: [u8;20], receiver: [u8; 20], payload: Vec<u8>, nonce: u64) -> Self{
-        let mut tx = Self{
-            sender,
-            receiver,
-            payload,
-            nonce,
-            hash: [0u8; 32],
-        };
-        tx.hash = tx.calculate_hash();
-        tx
-    }
-
-    pub fn calculate_hash(&self) -> Hash {
-        let mut hasher = Sha256::new();
-        hasher.update(&self.sender);
-        hasher.update(&self.receiver);
-        hasher.update(&self.payload);
-        hasher.update(&self.nonce.to_be_bytes());
-
-        let result = hasher.finalize();
-        let mut hash_res = [0u8; 32];
-        hash_res.copy_from_slice(&result);
-        hash_res
-    }
-}
 
 impl BlockData{
     pub fn new(
@@ -85,7 +59,7 @@ impl BlockData{
     }
 
     pub fn calculate_header_hash(header: &BlockHeader) -> Hash{
-        let mut hasher = Sha256::new();
+        let mut hasher = Keccak256::new();
         hasher.update(&header.prev_block_hash);
         hasher.update(&header.merkle_root);
         hasher.update(&header.timestamp.to_be_bytes());

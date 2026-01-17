@@ -7,7 +7,11 @@ use std::sync::Arc;
 use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr};
 use std::time::{Instant};
-use crate::block::model_struct::{Hash, TransactionData};
+//use crate::block::block_tester::run_block_tester;
+use crate::block::db::Storage;
+use crate::block::model_struct::{Hash};
+use crate::block::state::GlobalBalance;
+use crate::block::transaction::TransactionData;
 use crate::network::{discovery, rpc};
 use crate::network::peer::{Peer};
 
@@ -16,11 +20,14 @@ use crate::network::peer::{Peer};
 pub struct Node{ 
     pub port:u16,
     pub addr: SocketAddr,
+    pub wallet: [u8; 20],
     pub peers: HashMap<SocketAddr, Peer>,
     pub unconnected_addrs: HashSet<SocketAddr>,
     pub max_peers: usize ,
     pub recent_seen_message: HashMap<Vec<u8>, Instant>,
-    pub mempool: HashMap<Hash, TransactionData>, // 다음 블록이 생기기 이전까지 캐시 역할을 맡음. 
+    pub mempool: HashMap<Hash, TransactionData>, // 다음 블록이 생기기 이전까지 트랜잭션 저장 캐시 역할을 맡음. 
+    pub global_state: GlobalBalance, //블록 생기기 전까지 잔액을 관리함
+    pub storage: Arc<Storage>,
 }
 
 #[derive(Clone)]
@@ -30,23 +37,27 @@ pub struct NodeManage{
 impl NodeManage{
 
 
-    pub fn new(port:u16, addr: &str) -> Self{
+    pub fn new(port:u16, addr: &str, wallet: [u8;20], path: &str) -> Self{
         let node_addr = addr.parse().expect("INVALID ADDR");
         Self { 
             state: Arc::new(RwLock::new(Node{
                 port,
                 addr: node_addr,
+                wallet: wallet,
                 peers: HashMap::new(),
                 unconnected_addrs: HashSet::new(),
                 max_peers: 100, // Default: 10, need to change
                 recent_seen_message: HashMap::new(),
                 mempool: HashMap::new(),
+                global_state: GlobalBalance::new(),
+                storage: Arc::new(Storage::new(path)),
             })),
          }
     }
     pub async fn start(self: Arc<Self>, seeds:Vec<&str>) {
         let addr = {self.state.read().await.addr};
         let listener = TcpListener::bind(addr).await.unwrap();
+        let my_addr = self.state.read().await.wallet;
 
         //Make Ping - Pong for runtime
         let manager = Arc::clone(&self);
@@ -60,8 +71,12 @@ impl NodeManage{
         let rc = Arc::clone(&manager);
         tokio::spawn(async move{rc.start_reconnector().await;});
 
+        //let tester = Arc::clone(&self);
+        //tokio::spawn(async move{run_block_tester(tester).await;});
+
         //let txgen = Arc::clone(&manager);
         //tokio::spawn(async move {txgen.start_transaction_generator().await;});
+        
         
         let my_port = manager.state.read().await.port;
         let rpcport = my_port + 1000;

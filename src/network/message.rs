@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use crate::block::model_struct::{BlockData, TransactionData};
+use crate::block::{model_struct::BlockData, transaction::TransactionData};
 use std::net::SocketAddr;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -51,8 +51,8 @@ impl NetworkMessage{
     }
 
     pub fn get_id(&self) -> Vec<u8>{
-        use sha2::{Sha256, Digest};
-        let mut hasher = Sha256::new();
+        use sha3::{Keccak256, Digest};
+        let mut hasher = Keccak256::new();
         hasher.update(self.serialize());
         hasher.finalize().to_vec()
     }

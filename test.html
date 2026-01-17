@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rust Chain Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+</head>
+<body>
+    <h2>Rust Node Test (Live Server)</h2>
+    <button id="connectBtn" style="padding: 10px;">1. 메타마스크 연결</button>
+    <button id="sendBtn" style="padding: 10px;" disabled>2. 서명 및 전송</button>
+    <div id="log" style="margin-top: 20px; color: blue; white-space: pre-wrap; font-family: monospace;"></div>
+
+    <script>
+        let signer;
+
+        // 숫자를 8바이트(u64) Big-Endian 바이트 배열로 변환하는 함수 (Rust의 to_be_bytes 대응)
+        function toU64BeBytes(num) {
+            const buffer = new ArrayBuffer(8);
+            const view = new DataView(buffer);
+            // BigInt를 사용하여 64비트 정수 처리
+            view.setBigUint64(0, BigInt(num), false); // false = Big Endian
+            return new Uint8Array(buffer);
+        }
+
+        document.getElementById('connectBtn').onclick = async () => {
+            if (!window.ethereum) return alert("메타마스크를 설치하세요!");
+            try {
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                await provider.send("eth_requestAccounts", []);
+                signer = provider.getSigner();
+                document.getElementById('log').innerText = "연결 성공: " + await signer.getAddress();
+                document.getElementById('sendBtn').disabled = false;
+            } catch (err) {
+                alert("연결 실패: " + err.message);
+            }
+        };
+
+        document.getElementById('sendBtn').onclick = async () => {
+            try {
+                const sender = await signer.getAddress();
+                const receiver = "0x0000000000000000000000000000000000000000";
+                const value = 1000;
+                const nonce = 0;
+                const payload = new Uint8Array([1, 2, 3]);
+
+                // --- Rust의 verify_signature와 동일한 데이터 직렬화 ---
+                // 순서: sender(20) + receiver(20) + value(8) + nonce(8) + payload(n)
+                const senderBytes = ethers.utils.arrayify(sender);
+                const receiverBytes = ethers.utils.arrayify(receiver);
+                const valueBytes = toU64BeBytes(value);
+                const nonceBytes = toU64BeBytes(nonce);
+
+                const finalMessage = ethers.utils.concat([
+                    senderBytes,
+                    receiverBytes,
+                    valueBytes,
+                    nonceBytes,
+                    payload
+                ]);
+
+                document.getElementById('log').innerText = "서명 중...";
+
+                // 메타마스크 서명 (이때 Prefix가 자동으로 붙음)
+                const signature = await signer.signMessage(finalMessage);
+                
+                // Rust 서버 전송
+                const res = await fetch("http://localhost:10000/transaction", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        sender: Array.from(senderBytes),
+                        receiver: Array.from(receiverBytes),
+                        value: value,
+                        nonce: nonce,
+                        payload: Array.from(payload),
+                        signature: Array.from(ethers.utils.arrayify(signature))
+                    })
+                });
+
+                if (!res.ok) {
+                    const errText = await res.text();
+                    throw new Error(`서버 응답 에러 (${res.status}): ${errText}`);
+                }
+
+                const data = await res.json();
+                document.getElementById('log').innerText = "✅ 검증 성공! TX Hash: " + JSON.stringify(data);
+            } catch (err) {
+                console.error(err);
+                document.getElementById('log').innerText = "❌ 에러 발생:\n" + err.message;
+            }
+        };
+    </script>
+</body>
+</html>

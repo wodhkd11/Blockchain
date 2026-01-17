@@ -2,6 +2,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
+use sha3::{Digest, Keccak256};
+
 use crate::network::node::NodeManage;
 use crate::network::message::NetworkMessage;
 
@@ -25,11 +27,18 @@ impl NodeManage{
 
         if needs_gossip{ println!("Received Message: {:?} from {}", msg, from_addr); }
         match msg{
+            NetworkMessage::Block(block) =>{
+                
+            }
             NetworkMessage::Transaction(tx) => {
-                let tx_hash = tx.hash;
+                let sig_hash:[u8;32] = {
+                    let mut hasher = Keccak256::new();
+                    hasher.update(&tx.signature);
+                    hasher.finalize().into()
+                };
                 let mut state = self.state.write().await;
-                if !state.mempool.contains_key(&tx_hash){
-                    state.mempool.insert(tx_hash, tx.clone());
+                if !state.mempool.contains_key(&sig_hash){
+                    state.mempool.insert(sig_hash, tx.clone());
                     println!("[New transaction Added], Total: {}",state.mempool.len());
                 }
             }
