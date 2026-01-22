@@ -2,21 +2,22 @@ mod network;
 mod block;
 mod crypto;
 mod exec;
+mod rule;
+
 
 use std::{env, fs, sync::{Arc, OnceLock}};
-use once_cell::sync::Lazy;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use network::node::NodeManage;
 
 #[derive(Debug, Deserialize)]
 struct AppConfig {
-    node: NodeConfig,
-    network: NetworkConfig,
-    storage: StorageConfig,
+    node: NodeCfg,
+    network: NetworkCfg,
+    storage: StorageCfg,
 }
 
 #[derive(Debug, Deserialize)]
-struct NodeConfig {
+struct NodeCfg {
     ip_address: String,
     port: u16,
     rpc_port: u16, // RPC 포트 추가 (YAML에 있다고 가정)
@@ -26,17 +27,17 @@ struct NodeConfig {
     is_genesis: bool,
 }
 
-#[derive(Debug, Deserialize)]
-struct NetworkConfig {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct NetworkCfg {
     boot_nodes: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct StorageConfig {
+struct StorageCfg {
     db_path: String,
 }
 
-static PRIVATE_KEY: OnceLock<[u8;32]> = OnceLock::new();
+pub static PRIVATE_KEY: OnceLock<[u8;32]> = OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

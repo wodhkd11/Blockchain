@@ -1,124 +1,165 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Rust Chain Transfer Test</title>
+    <title>Rust Chain Governance Test</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #f4f7f6; color: #333; }
+        .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        .btn-area { display: flex; gap: 10px; margin-top: 20px; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        #connectBtn { background: #e67e22; color: white; }
+        #sendBtn { background: #3498db; color: white; }
+        button:disabled { background: #bdc3c7; cursor: not-allowed; }
+        #log { margin-top: 20px; padding: 15px; background: #2c3e50; color: #ecf0f1; border-radius: 8px; font-family: 'Courier New', Courier, monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; }
+        .status-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 10px; }
+        .debug { color: #f1c40f; }
+    </style>
 </head>
-<body style="font-family: sans-serif; padding: 20px; line-height: 1.6;">
-    <h2>Rust Node - Token Transfer Test</h2>
-    
-    <div style="background: #eee; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-        <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #ccc;">
-            <label><b>대상 노드 RPC 포트:</b></label><br>
-            <input type="number" id="rpcPort" style="width: 100px; padding: 8px;" value="10000">
-            <small style="color: #666;"> (루트: 10000, 피어: 10001...)</small>
-        </div>
+<body>
 
-        <div style="margin-bottom: 10px;">
-            <label><b>받는 사람 주소:</b></label><br>
-            <input type="text" id="targetAddr" style="width: 100%; max-width: 450px; padding: 8px;" value="0x0000000000000000000000000000000000000000">
-        </div>
-        <div style="margin-bottom: 10px;">
-            <label><b>송금 수량:</b></label><br>
-            <input type="number" id="amount" style="width: 100%; max-width: 450px; padding: 8px;" value="1000">
-        </div>
-        <button id="connectBtn" style="padding: 10px 20px; cursor: pointer; background: #f39c12; border: none; color: white; border-radius: 4px;">1. 메타마스크 연결</button>
-        <button id="sendBtn" style="padding: 10px 20px; cursor: pointer; background: #3498db; border: none; color: white; border-radius: 4px;" disabled>2. 송금 서명 및 전송</button>
-    </div>
+<div class="container">
+    <h2>🔗 Rust Chain Transaction Test</h2>
     
-    <div id="log" style="padding: 15px; background: #2c3e50; color: #ecf0f1; border-radius: 5px; white-space: pre-wrap; font-family: monospace; min-height: 100px;">
-        상태: 대기 중...
+    <div class="input-group">
+        <label>RPC 포트 (Port)</label>
+        <input type="number" id="rpcPort" value="10000">
     </div>
 
-    <script>
-        let signer;
+    <div class="input-group">
+        <label>수신자 주소 (Receiver Address)</label>
+        <input type="text" id="targetAddr" value="0x0000000000000000000000000000000000000000">
+    </div>
 
-        function toU64BeBytes(num) {
-            const buffer = new ArrayBuffer(8);
-            const view = new DataView(buffer);
-            view.setBigUint64(0, BigInt(num), false); 
-            return new Uint8Array(buffer);
+    <div class="input-group">
+        <label>송금 수량 (Amount)</label>
+        <input type="number" id="amount" value="1000">
+    </div>
+
+    <div class="btn-area">
+        <button id="connectBtn">1. 지갑 연결</button>
+        <button id="sendBtn" disabled>2. 서명 및 전송</button>
+    </div>
+
+    <div id="log">상태: 지갑 연결이 필요합니다.</div>
+</div>
+
+<script>
+    let signer;
+
+    // Helper: 숫자를 8바이트 Big-Endian Uint8Array로 변환 (Rust의 u64 대응)
+    function toU64BeBytes(num) {
+        const buffer = new ArrayBuffer(8);
+        const view = new DataView(buffer);
+        view.setBigUint64(0, BigInt(num), false); 
+        return new Uint8Array(buffer);
+    }
+
+    const logElement = document.getElementById('log');
+    function addLog(msg, isDebug = false) {
+        const time = new Date().toLocaleTimeString();
+        const formattedMsg = `[${time}] ${msg}\n`;
+        if (isDebug) {
+            logElement.innerHTML += `<span class="debug">${formattedMsg}</span>`;
+        } else {
+            logElement.innerText += formattedMsg;
         }
+        logElement.scrollTop = logElement.scrollHeight;
+    }
 
-        document.getElementById('connectBtn').onclick = async () => {
-            if (!window.ethereum) return alert("메타마스크를 설치해주세요!");
-            try {
-                const provider = new ethers.providers.Web3Provider(window.ethereum);
-                await provider.send("eth_requestAccounts", []);
-                signer = provider.getSigner();
-                const addr = await signer.getAddress();
-                document.getElementById('log').innerText = "✅ 연결 성공: " + addr;
-                document.getElementById('sendBtn').disabled = false;
-            } catch (err) { 
-                document.getElementById('log').innerText = "❌ 연결 실패: " + err.message;
-            }
-        };
+    document.getElementById('connectBtn').onclick = async () => {
+        if (!window.ethereum) return alert("MetaMask를 설치해주세요!");
+        try {
+            const provider = new ethers.providers.Web3Provider(window.ethereum);
+            await provider.send("eth_requestAccounts", []);
+            signer = provider.getSigner();
+            const addr = await signer.getAddress();
+            logElement.innerText = `✅ 연결 성공: ${addr}\n`;
+            document.getElementById('sendBtn').disabled = false;
+        } catch (err) {
+            logElement.innerText = `❌ 연결 실패: ${err.message}\n`;
+        }
+    };
 
-        document.getElementById('sendBtn').onclick = async () => {
-            const port = document.getElementById('rpcPort').value;
-            const baseUrl = `http://localhost:${port}`;
+    document.getElementById('sendBtn').onclick = async () => {
+        const port = document.getElementById('rpcPort').value;
+        const baseUrl = `http://localhost:${port}`;
 
-            try {
-                const sender = await signer.getAddress();
-                const receiver = document.getElementById('targetAddr').value;
-                const value = parseInt(document.getElementById('amount').value);
+        try {
+            const sender = await signer.getAddress();
+            const receiver = document.getElementById('targetAddr').value;
+            const value = parseInt(document.getElementById('amount').value);
 
-                // [STEP 1] 선택된 포트로 논스 조회
-                document.getElementById('log').innerText = `⏳ 노드(${port})에서 논스 조회 중...`;
-                const nonceRes = await fetch(`${baseUrl}/nonce/${sender}`);
-                if (!nonceRes.ok) throw new Error(`${port} 노드에서 논스를 가져오지 못했습니다.`);
-                const nonce = await nonceRes.json();
+            // 1. 노드에서 최신 논스(Nonce) 조회
+            addLog(`⏳ 노드(${port})에서 논스 조회 중...`);
+            const nonceRes = await fetch(`${baseUrl}/nonce/${sender}`);
+            if (!nonceRes.ok) throw new Error("논스 조회 실패");
+            const nonce = await nonceRes.json();
+            addLog(`📝 사용 예정 논스: ${nonce}`, true);
 
-                // [STEP 2] Payload 준비
-                const rawPayloadObj = {
-                    opcode: 2,
-                    fee: 10,
-                    data: { ticker: "KRW"} // 서버의 TransferParams 필드와 일치하는지 확인!
-                };
-                const payloadJsonString = JSON.stringify(rawPayloadObj);
-                const payloadBytes = ethers.utils.toUtf8Bytes(payloadJsonString);
+            // 2. Payload 구성 (JSON 문자열 -> Bytes)
+            const rawPayloadObj = {
+                opcode: 2,
+                fee: 0,
+                data: { ticker: "KRW" }
+            };
+            const payloadBytes = ethers.utils.toUtf8Bytes(JSON.stringify(rawPayloadObj));
 
-                // [STEP 3-5] 서명 및 데이터 구성 (기존과 동일)
-                const senderBytes = ethers.utils.arrayify(sender);
-                const receiverBytes = ethers.utils.arrayify(receiver);
-                const valueBytes = toU64BeBytes(value);
-                const nonceBytes = toU64BeBytes(nonce);
-                const finalMessage = ethers.utils.concat([senderBytes, receiverBytes, valueBytes, nonceBytes, payloadBytes]);
+            // 3. 서명용 메시지 생성 (Sender + Receiver + Value + Nonce + Payload)
+            const senderBytes = ethers.utils.arrayify(sender);
+            const receiverBytes = ethers.utils.arrayify(receiver);
+            const valueBytes = toU64BeBytes(value);
+            const nonceBytes = toU64BeBytes(nonce);
+            
+            const finalMessage = ethers.utils.concat([
+                senderBytes, 
+                receiverBytes, 
+                valueBytes, 
+                nonceBytes, 
+                payloadBytes
+            ]);
 
-                document.getElementById('log').innerText = "✍️ 서명 요청 중...";
-                const signature = await signer.signMessage(finalMessage);
+            // 디버깅용 해시 로그 출력 (논스가 바뀌면 이 값이 바뀌어야 함)
+            const msgHash = ethers.utils.keccak256(finalMessage);
+            addLog(`🔍 서명 대상 해시: ${msgHash}`, true);
 
-                const txData = {
-                    sender: Array.from(senderBytes),
-                    receiver: Array.from(receiverBytes),
-                    value: value,
-                    nonce: nonce,
-                    payload: Array.from(payloadBytes),
-                    signature: Array.from(ethers.utils.arrayify(signature))
-                };
+            // 4. 지갑 서명 요청
+            addLog("✍️ MetaMask 서명 대기 중...");
+            const signature = await signer.signMessage(finalMessage);
+            addLog(`🔏 서명 완료: ${signature.substring(0, 20)}...`, true);
 
-                // [STEP 6] 선택된 포트로 전송
-                document.getElementById('log').innerText = `🚀 노드(${port})로 전송 중...`;
-                const res = await fetch(`${baseUrl}/transaction`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(txData)
-                });
-               if (!res.ok) {
-                    const errorBody = await res.text(); // 서버가 보내는 구체적인 에러 메시지 읽기
-                    console.error("Server Error Detail:", errorBody);
-                    throw new Error(`Status: ${res.status}, Message: ${errorBody}`);
-                } 
+            // 5. 트랜잭션 데이터 패키징
+            const txData = {
+                sender: Array.from(senderBytes),
+                receiver: Array.from(receiverBytes),
+                value: value,
+                nonce: nonce,
+                payload: Array.from(payloadBytes),
+                signature: Array.from(ethers.utils.arrayify(signature))
+            };
 
-                if (!res.ok) throw new Error(await res.text());
+            // 6. 노드로 전송
+            addLog(`🚀 노드(${port})로 전송 중...`);
+            const res = await fetch(`${baseUrl}/transaction`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(txData)
+            });
 
-                const result = await res.json();
-                document.getElementById('log').innerText = `✅ 성공 (${port} 노드): \n` + JSON.stringify(result, null, 2);
+            const resultText = await res.text();
+            if (!res.ok) throw new Error(`서버 에러: ${resultText}`);
 
-            } catch (err) {
-                document.getElementById('log').innerText = `❌ 에러 (Port ${port}):\n` + err.message;
-            }
-        };
-    </script>
+            addLog(`✅ 전송 성공!\n${resultText}`);
+
+        } catch (err) {
+            addLog(`❌ 오류 발생: ${err.message}`);
+            console.error(err);
+        }
+    };
+</script>
+
 </body>
 </html>

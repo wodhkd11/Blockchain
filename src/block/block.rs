@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::{PRIVATE_KEY, block::{transaction::{ConfirmedTransaction, TransactionData}, types::*}, crypto::signature};
+use crate::{block::{transaction::ConfirmedTransaction, types::*}, crypto::signature::{self, verify_for_block}};
 use sha3::{Keccak256, Digest};
 
 
@@ -14,7 +14,7 @@ impl BlockData{
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let merkle_root = Self::calculate_merkle_root(transactions.clone());
+        let merkle_root = Self::calculate_merkle_root(&transactions);
         let header = BlockHeader{
             height: prev_block.header.height + 1,
             prev_block_hash: prev_block.hash,
@@ -34,7 +34,7 @@ impl BlockData{
         }
     }
 
-    pub fn calculate_merkle_root(transactions: Vec<ConfirmedTransaction>) -> [u8;32]{
+    pub fn calculate_merkle_root(transactions: &Vec<ConfirmedTransaction>) -> [u8;32]{
         if transactions.is_empty(){return [0u8;32];}
         let mut hashes: Vec<[u8;32]> = transactions
             .iter()
@@ -88,5 +88,14 @@ impl BlockData{
         hasher.update(&header.timestamp.to_be_bytes());
         hasher.update(&header.valdiator);
         hasher.finalize().into()
+    }
+}
+
+impl BlockData{
+    pub fn verify_all(&self) -> bool{
+        let sig_ok = verify_for_block(self.header.valdiator, &self.signature, &self.hash);
+        let hash_ok = Self::calculate_header_hash(&self.header) == self.hash;
+        let body_ok = Self::calculate_merkle_root(&self.body) == self.header.merkle_root;
+        sig_ok && hash_ok && body_ok
     }
 }

@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
+use crate::rule::config::NetworkConfig;
+
+
 // Type aliases
 pub type Address = [u8; 20];
 pub type Hash = [u8; 32];
@@ -41,6 +44,7 @@ pub struct BlockData{
 pub struct Account{
     pub balance: HashMap<TokenTicker, u64>, //Symbol, value
     pub nonce: u64,
+    pub last_seen_block: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,4 +53,10 @@ pub struct GlobalBalance{
     pub gov_shares: HashMap<Address, u64>,
     pub gas_pool: u64,
     pub token_metadata: HashMap<TokenTicker, TokenInfo>,
+    pub config: NetworkConfig,
+}
+
+pub struct StateDiff{
+    pub accounts: HashMap<Address, Account>,
+    pub token_changed: Option<TokenTicker>,
 }

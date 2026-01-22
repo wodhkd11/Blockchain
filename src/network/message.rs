@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum NetworkMessage{
     Hello {listening_port: u16},
+    
     Status{chain_id: u64, best_height: u64, best_hash: [u8;32],},
     NewTransaction(TransactionData), //트랜잭션 전파
     NewBlock(BlockData), // 블록 전파

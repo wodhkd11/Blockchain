@@ -2,69 +2,36 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
+use sha3::digest::block_buffer::Block;
 use sha3::{Digest, Keccak256};
 
 use crate::block::types::BlockData;
 use crate::crypto::signature::{verify, verify_for_block};
 use crate::exec;
-use crate::network::node::NodeManage;
+use crate::network::node::{self, NodeManage};
 use crate::network::message::NetworkMessage;
 
 
 impl NodeManage{
+    fn needs_gossip(&self, msg: &NetworkMessage) -> bool{
+        matches!(
+            msg,
+            NetworkMessage::NewTransaction(_) |
+            NetworkMessage::NewBlock(_)
+        )
+    }
 
     pub async fn handle_message(self: Arc<Self>, from_addr: SocketAddr, msg: NetworkMessage){
-        let needs_gossip = match &msg{
-            NetworkMessage::NewTransaction(_) | NetworkMessage::NewBlock(_) => true,
-            _ => false,
-        };
-        if needs_gossip{
-            let msg_id = msg.get_id();
-            {
-                let mut state = self.state.write().await;
-                if state.recent_seen_message.contains_key(&msg_id){return;}
-                state.recent_seen_message.insert(msg_id, Instant::now());
-            }
-            self.relay_message(from_addr, msg.clone()).await;
+        if self.needs_gossip(&msg){
+            if !self.mark_seen(&msg).await{ return; }
+            let self_clone = self.clone();
+            let msg_clone = msg.clone();
+            tokio::spawn(async move{ self_clone.relay_message(from_addr, msg_clone).await; });
+            { println!("Received Message: {:?} from {}", &msg, &from_addr); }
         }
 
-        if needs_gossip{ println!("Received Message: {:?} from {}", msg, from_addr); }
         match msg{
-            NetworkMessage::NewBlock(block) =>{
-                //check block is already exists
-                { 
-                    let state = self.state.read().await;
-                    if state.storage.get_block(&block.hash).is_some() { return; }
-                }
-                //check block is valid
-                let calculated_hash = BlockData::calculate_header_hash(&block.header);
-                if calculated_hash != block.hash{
-                    println!("[WARN]: Hash missmatched");
-                    return;
-                }
-                //check signature is valid
-                let sig: [u8;65] = block.signature.clone();
-                if !verify_for_block(block.header.valdiator, &sig, &block.hash){
-                    println!("[WARN]: Block Signature invalid");
-                    return;
-                }
-                let mut node_state = self.state.write().await;
-                let mut temp_state = node_state.global_state.clone();
-
-                match exec::execute_block(&mut temp_state, &block, &node_state.storage){
-                    Ok(state_updates) =>{
-                        node_state.global_state = temp_state;
-                        node_state.storage.commit_block(&block, &state_updates, &node_state.global_state);
-                        node_state.last_block = block.clone();
-                        node_state.block_height = block.header.height;
-                        node_state.global_state.balances.clear();
-                        println!("[SUCCESS]: Blcok #{} accepted.", block.header.height);
-                    }
-                    Err(e) => {
-                        println!("[REJECT] Block #{} rejected: {}", block.header.height, e);
-                    }
-                }
-            }
+            NetworkMessage::NewBlock(block) => self.handle_new_block(block).await,
             NetworkMessage::NewTransaction(tx) => {
                 let sig_hash:[u8;32] = {
                     let mut hasher = Keccak256::new();
@@ -119,5 +86,52 @@ impl NodeManage{
             _ => {}
         }
         
+    }
+
+    async fn mark_seen(&self, msg: &NetworkMessage) -> bool{
+        let msg_id = msg.get_id();
+        let mut state = self.state.write().await;
+        if state.recent_seen_message.contains_key(&msg_id){ return false; }
+        state.recent_seen_message.insert(msg_id, Instant::now());
+        true
+    }
+
+
+
+///////handlers////////
+    async fn handle_new_block(&self, block:BlockData){
+        if !block.verify_all(){ return; }
+        let mut node_state = self.state.write().await;
+        if node_state.storage.get_block(&block.hash).is_some(){ return; }
+        
+        let storage = node_state.storage.clone();
+
+        let exec_result = {
+            let mut global_state = node_state.global_state.write().await;
+            match exec::execute_block(&mut global_state, &block, &storage){
+                Ok((acc_updates,tk_updates)) => (Some((acc_updates, tk_updates))),
+                Err(e) => {
+                    println!("[REJECT]: {e}");
+                    (None)
+                }
+            }
+        };
+        if let Some((acc_updates, tk_updates)) = exec_result{
+            {
+                let mut final_global = node_state.global_state.write().await;
+                final_global.remove_from_memory(block.header.height, 20);// 여기도 주기 
+                node_state.storage.commit_block(
+                    &block,
+                    &acc_updates,
+                    &tk_updates,
+                    &final_global
+                );
+            }
+            node_state.last_block = block.clone();
+            node_state.block_height = block.header.height;
+            println!("[SUCCESS]: Block #{} accepted {} transactions",
+                block.header.height, block.body.len());
+        }
+
     }
 }

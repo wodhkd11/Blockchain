@@ -18,5 +18,11 @@ pub struct TransferParams{ //전이할 데이터: 토큰과 값, from과 to는 t
     pub ticker: TokenTicker,
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct MintParams{
+    pub ticker: TokenTicker,
+}
+
+
 //pub fn MintParams{}
 //pub fn BurnParams{}

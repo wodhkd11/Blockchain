@@ -23,6 +23,8 @@ use crate::network::tasks::discovery;
 pub static GENESIS_BLOCK: Lazy<BlockData> = Lazy::new(|| {
     BlockData::create_genesis_block([0u8;20])
 });
+
+
 pub struct Node{ 
     pub port:u16,
     pub addr: SocketAddr,
@@ -33,7 +35,7 @@ pub struct Node{
     pub max_peers: usize ,
     pub recent_seen_message: HashMap<Vec<u8>, Instant>,
     pub mempool: HashMap<Hash, TransactionData>, // 다음 블록이 생기기 이전까지 트랜잭션 저장 캐시 역할을 맡음. 
-    pub global_state: GlobalBalance, //블록 생기기 전까지 잔액을 관리함
+    pub global_state: Arc<RwLock<GlobalBalance>>, //블록 생기기 전까지 잔액을 관리함
     pub storage: Arc<Storage>,
 
     pub last_block: BlockData,
@@ -45,70 +47,6 @@ pub struct NodeManage{
     pub state: Arc<RwLock<Node>>,
 }
 impl NodeManage{
-
-
-    pub fn new(port:u16, addr: &str, wallet: [u8;20], path: &str, is_genesis: bool) -> Self{
-
-        let node_addr = addr.parse().expect("INVALID ADDR");
-        let storage = Arc::new(Storage::new(path));
-        let last_block = if storage.is_empty(){
-            if is_genesis {
-                println!("I am genesis NODE");
-                let g = BlockData::create_genesis_block(wallet);
-                g
-            }else{
-                println!("[NODE]: Load Genesis setting");
-                GENESIS_BLOCK.clone()
-            }
-        } else{ storage.get_latest_block().unwrap() };
-        let block_height = last_block.header.height;
-        let mut global_state = GlobalBalance::new();
-        let owner = hex::decode("0fa41b6927a59eccb1f253a62e0164b5ce96f7c5")
-            .expect("");
-        let mut owner_addr = [0u8;20];
-        owner_addr.copy_from_slice(&owner);
-            
-        global_state.token_metadata.insert("KRW".to_string(), TokenInfo {
-            name: "Korean Won".to_string(),
-            symbol: "KRW".to_string(),
-            decimals: 1,
-            total_supply: TOTAL_SUPPLY, // 소수점 포함 계산
-            admin: owner_addr,
-        });
-
-        // 2. GOV 토큰 메타데이터 등록
-        global_state.token_metadata.insert("GOV".to_string(), TokenInfo {
-            name: "Governance Token".to_string(),
-            symbol: "GOV".to_string(),
-            decimals: 1,
-            total_supply: TOTAL_SUPPLY,
-            admin: owner_addr,
-        });
-
-        global_state.add_balance(&owner_addr, &"GOV".to_string(), TOTAL_SUPPLY, &storage);
-        global_state.add_balance(&owner_addr, &"KRW".to_string(), 100000*DECIMALS, &storage);
-        
-        let genesis = &*GENESIS_BLOCK;
-
-        println!("{:?}",genesis.hash) ;              
-        Self { 
-            state: Arc::new(RwLock::new(Node{
-                port,
-                addr: node_addr,
-                wallet: wallet,
-                chain_id: 6699,
-                peers: HashMap::new(),
-                unconnected_addrs: HashSet::new(),
-                max_peers: 100, // Default: 10, need to change
-                recent_seen_message: HashMap::new(),
-                mempool: HashMap::new(),
-                global_state: global_state,
-                storage,
-                last_block: genesis.clone(),
-                block_height: 0,
-            })),
-         }
-    }
     pub async fn start(self: Arc<Self>, seeds:Vec<&str>) {
         let addr = {self.state.read().await.addr};
         let listener = TcpListener::bind(addr).await.unwrap();
@@ -149,7 +87,8 @@ impl NodeManage{
         });
 
         ///////// Initialized Comeplete //////////
-        
+
+
 
         //discovery 이후 노드들과 소통하는 과정
         loop{

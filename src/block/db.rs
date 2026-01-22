@@ -1,9 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rocksdb::{DB, IteratorMode, Options, WriteBatch};
-use sha3::digest::block_buffer::Block;
 
-use crate::block::{genesis::DECIMALS, types::{Account, Address, BlockData, GlobalBalance, Hash, TokenInfo}};
+use crate::block::types::{Account, Address, BlockData, GlobalBalance, Hash, TokenTicker};
 
 const PREFIX_BLOCK: u8 = b'b';
 const PREFIX_INDEX: u8 = b'i';
@@ -85,11 +84,11 @@ impl Storage{
         (stakers, total_stake)
     }
 
-    pub fn get_account(&self, address: &Address) -> Account{
+    pub fn get_account(&self, address: &Address, cur_height: u64) -> Account{
         let key = Self::acc_key(address);
         self.db.get(key).ok().flatten()
             .and_then(|bytes| postcard::from_bytes(&bytes).ok())
-            .unwrap_or(Account { balance: HashMap::new() , nonce: 0u64 })
+            .unwrap_or(Account { balance: HashMap::new() , nonce: 0u64, last_seen_block: cur_height })
     }
     pub fn get_block(&self, hash: &Hash) -> Option<BlockData>{
         let key = Self::blk_key(hash);
@@ -114,17 +113,18 @@ impl Storage{
         self.get_block(&last_hash)
     }
 
-    pub fn commit_block(&self, block: &BlockData, state_update: &HashMap<Address, Account>, global_state: &GlobalBalance){
+    pub fn commit_block(&self, block: &BlockData, state_update: &HashMap<Address, Account>, updated_tokens: &HashSet<TokenTicker>, global_state: &GlobalBalance){
         let mut batch = WriteBatch::default();
-        //hash - block data
+        let height = block.header.height;
+
         let blk_key = Self::blk_key(&block.hash);
         let blk_bytes = postcard::to_allocvec(block).expect("Block Serialize Failed");
         batch.put(blk_key, blk_bytes);
         
         //height - block hash 
-        let idx_key = Self::idx_key(block.header.height);
+        let idx_key = Self::idx_key(height);
         batch.put(idx_key, block.hash);
-
+ 
         //KEY_LAST_BLOCK은 최신의 블록 해시 하나의 값만 가짐
         batch.put(KEY_LAST_BLOCK, block.hash);
 
@@ -133,19 +133,31 @@ impl Storage{
             let acc_bytes = postcard::to_allocvec(acc).expect("Account Serialize Failed");
             batch.put(acc_key, acc_bytes);
 
+            let s_key = Self::staker_key(addr);
             if let Some(&gov_amount) = global_state.gov_shares.get(addr){
                 if gov_amount > 0{
-                    let s_key = Self::staker_key(addr);
                     batch.put(s_key, gov_amount.to_be_bytes());
                 } else{
-                    let s_key = Self::staker_key(addr);
                     batch.delete(s_key);
                 }
             }
         }
+        for ticker in updated_tokens{
+            if let Some(_info) = global_state.token_metadata.get(ticker){
+                let mut t_key = vec![PREFIX_TOKEN];
+                t_key.extend_from_slice(ticker.as_bytes());
+                let t_bytes = postcard::to_allocvec(_info).expect("Token Serialize Failed");
+                batch.put(t_key, t_bytes);
+            }
+        }
 
-        let gs_bytes = postcard::to_allocvec(global_state).expect("Globalstate Serialize Failed");
-        batch.put(vec![PREFIX_GLOBAL_STATE], gs_bytes);
+        if height == 0 || height % 10 == 0 {
+            let gs_bytes = postcard::to_allocvec(global_state).expect("Globalstate Serialize Failed");
+            let mut history_key = vec![PREFIX_GLOBAL_STATE];
+            history_key.extend_from_slice(&height.to_be_bytes());
+            batch.put(history_key, gs_bytes);
+            batch.put(b"latest_snapshot_height", height.to_be_bytes());
+        }
         self.db.write(batch).expect("Block Commit Failed");
     }
 

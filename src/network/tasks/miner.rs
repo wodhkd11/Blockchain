@@ -1,5 +1,5 @@
-use std::sync::Arc;
-use crate::{block::{transaction::ConfirmedTransaction, types::BlockData}, exec, network::{message::NetworkMessage, node::{Node, NodeManage}}};
+use std::{collections::{HashMap, HashSet}, sync::Arc};
+use crate::{block::{transaction::ConfirmedTransaction, types::{Account, Address, BlockData}}, exec, network::{message::NetworkMessage, node::{self, Node, NodeManage}}};
 use tokio::{sync::RwLock, time::{Duration, sleep}};
 
 impl NodeManage{
@@ -10,12 +10,16 @@ impl NodeManage{
         loop{
             sleep(Duration::from_secs(4)).await;
             let mut node_lock = self.state.write().await;
+            let mut global_state = node_lock.global_state.write().await.clone();
+            let mut state_update: HashMap<Address, Account> = HashMap::new();
+            let mut token_updates = HashSet::new();
+
+
             let my_address = node_lock.wallet;
-            let my_gov = node_lock.global_state.gov_shares.get(&my_address).cloned().unwrap_or(0);
+            let my_gov = global_state.gov_shares.get(&my_address).cloned().unwrap_or(0);
             let port = node_lock.port;
             if port != 9000{
                 println!("PERMISSION DENIED ");
-                drop(node_lock);
                 continue;
             }
             //트랜잭션 없으면 쉬는 로직도 필요할듯?
@@ -26,50 +30,59 @@ impl NodeManage{
             //}// 이외에도 POS 등 로직 넣어줘야하는곳. 현재 내가 마이닝노드인지 확인 알고리즘 필요함.
         
             let mut valid_transactions = Vec::new();
-            let keys: Vec<_>  = node_lock.mempool.keys().cloned().take(100).collect();
+            let keys: Vec<_>  = node_lock.mempool.keys().take(100).cloned().collect();
             let storage = node_lock.storage.clone();
-            let mut global_state = node_lock.global_state.clone();
+            let next_height = node_lock.block_height + 1;
+
             for key in keys{
-                if let Some(tx) = node_lock.mempool.get(&key){
-                    if !tx.verify(){
+                let tx = if let Some(tx) = node_lock.mempool.get(&key){
+                    tx.clone()
+                }else {continue;};
+                
+                if !tx.verify(){
+                    node_lock.mempool.remove(&key);
+                    continue;
+                }
+
+                match exec::apply_transaction(&mut global_state, &tx, next_height, &storage){
+                    Ok(diff) => {
                         node_lock.mempool.remove(&key);
-                        continue;
+                        valid_transactions.push(ConfirmedTransaction::from(&tx));
+                        for (addr, acc) in diff.accounts{
+                            state_update.insert(addr, acc);
+                        }
+                        if let Some(ticker) = diff.token_changed{
+                            token_updates.insert(ticker);
+                        }
                     }
-                    match exec::apply_transaction(&mut global_state, tx, &storage){
-                        Ok(_) => {
-                            let tx_data = node_lock.mempool.remove(&key).unwrap();
-                            let sender = tx_data.sender;
-                            //global_state.inc_nonce(&sender, &storage);
-                            let confirmed = ConfirmedTransaction::from(&tx_data);
-                            valid_transactions.push(confirmed);
-                        }
-                        Err(e) => {
-                            println!("[MINER]: Transaction Exec failed\nKey: {:?}\nErrorcode: {e}",key);
-                            node_lock.mempool.remove(&key).unwrap();
-                        }
+                    Err(e) => {
+                        println!("[MINER]: Transaction Exec failed {e}");
+                        node_lock.mempool.remove(&key);
                     }
                 }
             }
-            if valid_transactions.len() == 0 {
-                println!("[MINER]: No transaction, jump this block.");
-                continue;
-            }
+            // if valid_transactions.is_empty() {
+                // println!("[MINER]: No transaction, jump this block.");
+                // continue;
+            // }
             println!("[MINER]: New block generating: {} Transactions", valid_transactions.len());
-            global_state.distribute_gas(&storage);
+            global_state.distribute_gas(next_height, &storage);
         
             let new_block = BlockData::new(
                 &node_lock.last_block,
                 valid_transactions,
                 my_address
             );
-            node_lock.global_state = global_state;
-            node_lock.storage.commit_block(&new_block, &node_lock.global_state.balances, &node_lock.global_state);
 
-            let next_height = new_block.header.height;
+            global_state.remove_from_memory(next_height, 20); // 이거 블록 20개가 아니라 cnofig에서 가져오는거도 해봐야됨.
+            node_lock.storage.commit_block(&new_block, &state_update, &token_updates, &global_state);
+            
+            *node_lock.global_state.write().await = global_state;
             let block_hash = new_block.hash;
             node_lock.block_height = next_height;
             node_lock.last_block = new_block.clone();
-            node_lock.global_state.balances.clear();
+
+            //global_state.balances.clear();
             println!("\n====================");
             println!("[MINER]: New block generated");
             println!("Height: {}",next_height);
