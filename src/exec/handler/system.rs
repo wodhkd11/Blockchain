@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::{block::{db::Storage, types::{Account, Address, GlobalBalance, StateDiff, TokenInfo, TokenTicker}}, exec::schema::RegisterTokenParams};
+use crate::{block::{db::Storage, types::{Account, Address, Balance, GlobalBalance, StateDiff, TokenInfo, TokenTicker}}, exec::schema::RegisterTokenParams};
 
 
 /**
@@ -20,18 +20,20 @@ pub fn register_token(
     state: &mut GlobalBalance,
     from: Address,
     to: Address, //None 0
-    value: u64, //None 0
-    fee: u64,
+    value: Balance, //None 0
+    fee: Balance,
     params: serde_json::Value,
     cur_height: u64,
     db: &Storage
 ) -> Result<StateDiff, String>{
-    let json_params: RegisterTokenParams = serde_json::from_value(params).expect("INVALID_JSON");
+    let json_params: RegisterTokenParams = serde_json::from_value(params)
+        .map_err(|e| format!("INVALID_JSON: {e}"))?;
     
     let ticker = json_params.symbol.to_uppercase();
+    //이거 왜 거버넌스 쉐어 없는데 작동하지;
     if !state.gov_shares.contains_key(&from){return Err("PERMISSION_DENIED".into());}
-    let threshold = 20 as u64;
-    if state.gov_shares.get(&from).unwrap() < &threshold {return Err("THRESHOLD_ERROR".into());}
+    let threshold = state.config.governance_threshold;
+    if state.gov_shares.get(&from).unwrap() < &Balance::from(threshold) {return Err("THRESHOLD_ERROR".into());}
     if state.token_metadata.contains_key(&ticker){
         return Err(format!("TOKEN_ALREADY_EXISTS_{ticker}"));
     }
@@ -45,11 +47,20 @@ pub fn register_token(
         json_params.initial_supply,
         to,
     );
-    state.pay_gas(&from, fee,  cur_height, db)?;
-    state.token_metadata.insert(ticker.clone(),new_metadata);
-    state.add_balance(&to, &ticker, value, cur_height, db);
+    state.token_metadata.insert(ticker.clone(), new_metadata);
+    let gas_tkn = state.config.gas_token.clone();
+    {
+        let from_acc = state.get_account_mut(&from, cur_height, db);
+        from_acc.pay_gas(fee, &gas_tkn);
+        from_acc.inc_nonce();
+    }
+    {
+        let to_acc = state.get_account_mut(&to, cur_height, db);
+        to_acc.add_balance(&ticker, value);
+    }
+
     println!("[NEW TOKEN] Registered: {ticker} by {}", hex::encode(from));
-    state.inc_nonce(&from, cur_height, db);
+
     let mut changed_accounts = HashMap::new();
     changed_accounts.insert(to, state.get_account_read(&to, cur_height, db));
     changed_accounts.insert(from, state.get_account_read(&from, cur_height, db));

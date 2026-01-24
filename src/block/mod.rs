@@ -5,3 +5,4 @@ pub mod balance;
 pub mod db;
 pub mod genesis;
 pub mod asset;
+pub mod account;

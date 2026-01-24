@@ -5,10 +5,12 @@ pub mod schema;
 pub mod handler;
 
 
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, fmt::format};
 
+use primitive_types::U256;
 use serde::Deserialize;
-use crate::{block::{db::Storage, transaction::TransactionData, types::{Account, Address, BlockData, GlobalBalance, StateDiff, TokenTicker}}, exec::{handler::{mint::handle_mint, system::register_token, token::handle_transfer}, opcodes::*}};
+use serde_with::{serde_as, DisplayFromStr};
+use crate::{block::{db::Storage, transaction::TransactionData, types::{Account, Address, Balance, BlockData, GlobalBalance, StateDiff, TokenTicker}}, exec::{handler::{admin::config_update, mint::handle_mint, system::register_token, token::handle_transfer}, opcodes::*}};
 
 // pub enum Instruction{
     // RegisterToken(RegisterTokenParams),
@@ -40,10 +42,12 @@ pub const OP_TOKEN_TRANSFER: u8 = 0x02;
 pub const OP_TOKEN_BURN: u8 = 0x03;
 pub const OP_PAY_PURCHASE: u8 = 0x04;
  */
+#[serde_as]
 #[derive(Deserialize)]
 pub struct RawPayload{
     pub opcode: u8,
-    pub fee: u64,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub fee: Option<Balance>,
     pub data: serde_json::Value,
 }
 
@@ -54,20 +58,41 @@ pub fn apply_transaction(state: &mut GlobalBalance, tx: &TransactionData, cur_he
     let raw_payload: RawPayload = serde_json::from_slice(&tx.payload)
         .map_err(|_| "Invalid Payload JSON")?;
     let opcode = raw_payload.opcode;
-    let fee = raw_payload.fee;
+    // let f = raw_payload.fee;
+    // let fee = match f{
+    //     Some(v) => {
+    //         if v == 0{
+                
+    //         }
+    //     }
+    // }
+    let fee = match raw_payload.fee{
+        Some(f) => {
+            if f == U256::zero(){
+                state.config.min_gas_price
+            } else{
+                if f < state.config.min_gas_price {
+                    return Err(format!("INSUFFICIENT_GAS_FEE"));
+                }
+                f
+            }
+        },
+        None => {state.config.min_gas_price}
+    };
+
     match opcode{
         OP_SYSTEM_REGISTER_TOKEN => {
-            register_token(state, tx.sender, tx.receiver, tx.value, fee, raw_payload.data, cur_height, &db)
+            register_token(state, tx.sender, tx.receiver, Balance::from(tx.value), Balance::from(fee), raw_payload.data, cur_height, &db)
         },
         OP_TOKEN_TRANSFER => {
-            handle_transfer(state, tx.sender, tx.receiver, tx.value, fee, raw_payload.data, cur_height, &db)
+            handle_transfer(state, tx.sender, tx.receiver, Balance::from(tx.value), Balance::from(fee), raw_payload.data, cur_height, &db)
         }
         OP_TOKEN_MINT => {
-            handle_mint(state, tx.sender, tx.receiver, tx.value, fee, raw_payload.data, cur_height, &db)
+            handle_mint(state, tx.sender, tx.receiver, Balance::from(tx.value), Balance::from(fee), raw_payload.data, cur_height, &db)
         }
-        // OP_TOKEN_MINT =>{
-        // }
-
+        OP_CONFIG => {
+            config_update(state, tx.sender, tx.receiver, Balance::from(tx.value), Balance::from(fee), raw_payload.data, cur_height, &db)
+        }
         _ => Err("OP NOT FOUND".to_string())
     }
 }

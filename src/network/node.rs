@@ -10,7 +10,6 @@ use std::net::{SocketAddr};
 use std::time::{Instant};
 //use crate::block::block_tester::run_block_tester;
 use crate::block::db::Storage;
-use crate::block::genesis::{DECIMALS, TOTAL_SUPPLY};
 //use crate::block::genesis::GENESIS_BLOCK;
 use crate::block::types::{Address, BlockData, GlobalBalance, Hash, TokenInfo};
 use crate::block::transaction::TransactionData;

@@ -1,10 +1,17 @@
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{collections::{HashMap, HashSet}, sync::{Arc, LazyLock}};
 
+use primitive_types::U256;
 use tokio::sync::RwLock;
 
-use crate::{block::{db::Storage, genesis::*, types::{BlockData, GlobalBalance, TokenInfo}}, network::node::*};
+use crate::{block::{db::Storage, genesis::*, types::{Balance, BlockData, GlobalBalance, TokenInfo}}, network::node::*};
 
+pub static DECIMALS_POW: LazyLock<U256> = LazyLock::new(|| {
+    U256::from(10).pow(U256::from(18))
+});
 
+pub static TOTAL_SUPPLY: LazyLock<U256> = LazyLock::new(|| {
+    U256::from(100).checked_mul(*DECIMALS_POW).unwrap()
+});
 
 impl NodeManage{
     pub fn new(port:u16, addr: &str, wallet: [u8;20], path: &str, is_genesis: bool) -> Self{
@@ -31,8 +38,8 @@ impl NodeManage{
         global_state.token_metadata.insert("KRW".to_string(), TokenInfo {
             name: "Korean Won".to_string(),
             symbol: "KRW".to_string(),
-            decimals: 1,
-            total_supply: TOTAL_SUPPLY, // 소수점 포함 계산
+            decimals: 18,
+            total_supply: *TOTAL_SUPPLY, // 소수점 포함 계산
             admin: owner_addr,
         });
 
@@ -40,14 +47,22 @@ impl NodeManage{
         global_state.token_metadata.insert("GOV".to_string(), TokenInfo {
             name: "Governance Token".to_string(),
             symbol: "GOV".to_string(),
-            decimals: 1,
-            total_supply: TOTAL_SUPPLY,
+            decimals: 18,
+            total_supply: *TOTAL_SUPPLY,
             admin: owner_addr,
         });
+        global_state.gov_shares.insert(owner_addr, *TOTAL_SUPPLY);
+        let admin = global_state.get_account_mut(&owner_addr, 0, &storage);
+        admin.add_balance(&"GOV".to_string(), *TOTAL_SUPPLY);
+// 1. 100000을 U256으로 먼저 변환
+// 2. 그 다음 U256끼리 곱하기 (checked_mul 사용)
+let initial_krw = U256::from(100_000)
+    .checked_mul(*DECIMALS_POW)
+    .expect("KRW supply overflow");
 
-        global_state.add_balance(&owner_addr, &"GOV".to_string(), TOTAL_SUPPLY, 0, &storage);
-        global_state.add_balance(&owner_addr, &"KRW".to_string(), 100000*DECIMALS, 0, &storage);
-        
+admin.add_balance(&"KRW".to_string(), initial_krw);        
+
+
         let genesis = &*GENESIS_BLOCK;
 
         println!("{:?}",genesis.hash) ;              

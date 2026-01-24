@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rust Chain Explorer v4</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
+            --accent: #38bdf8;
+            --border: #334155;
+            --success: #10b981;
+        }
+
+        body { 
+            font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+            background: var(--bg); 
+            color: var(--text); 
+            margin: 0; 
+            padding: 20px;
+            line-height: 1.5;
+        }
+
+        .container { max-width: 1200px; margin: auto; }
+
+        /* Header */
+        header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            padding: 20px 0; 
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 30px;
+        }
+        h1 { font-size: 24px; color: var(--accent); margin: 0; display: flex; align-items: center; gap: 10px; }
+        .refresh-btn { 
+            background: var(--accent); color: var(--bg); border: none; 
+            padding: 10px 20px; border-radius: 8px; font-weight: bold; 
+            cursor: pointer; transition: 0.2s;
+        }
+        .refresh-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+
+        /* Summary Stats */
+        .summary-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); 
+            gap: 20px; 
+            margin-bottom: 40px; 
+        }
+        .stat-card { 
+            background: var(--card); padding: 24px; border-radius: 16px; 
+            border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        .stat-label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+        .stat-value { font-size: 24px; font-weight: bold; margin-top: 8px; color: #fff; display: block; word-break: break-all; }
+
+        /* Table Area */
+        .table-wrapper { 
+            background: var(--card); border-radius: 16px; border: 1px solid var(--border); 
+            overflow: hidden; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+        }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th { background: rgba(51, 65, 85, 0.5); padding: 16px; font-size: 13px; color: var(--text-dim); font-weight: 600; }
+        td { padding: 16px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
+        
+        /* Account Styles */
+        .address { 
+            font-family: 'Cascadia Code', monospace; color: #fbbf24; 
+            background: rgba(251, 191, 36, 0.1); padding: 6px 12px; 
+            border-radius: 6px; font-size: 13px;
+        }
+        .nonce-badge { 
+            display: inline-block; padding: 2px 8px; background: rgba(56, 189, 248, 0.1);
+            color: var(--accent); border-radius: 4px; font-weight: bold;
+        }
+
+        /* Balance Badges */
+        .balance-item { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .balance-item:last-child { margin-bottom: 0; }
+        .ticker-badge { 
+            min-width: 50px; text-align: center; padding: 4px 8px; 
+            border-radius: 6px; font-size: 11px; font-weight: 800; 
+            background: #334155; color: #fff;
+        }
+        .ticker-krw { background: #065f46; color: #34d399; }
+        .ticker-gov { background: #9a3412; color: #fdba74; }
+        .ticker-usd { background: #1e3a8a; color: #93c5fd; }
+        .amount-val { font-weight: 600; font-size: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>💎 Rust Chain Real-time Monitor</h1>
+        <button class="refresh-btn" onclick="fetchState()">FORCE REFRESH</button>
+    </header>
+
+    <div class="summary-grid">
+        <div class="stat-card">
+            <span class="stat-label">Block Height</span>
+            <span id="height" class="stat-value">-</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Mempool Txs</span>
+            <span id="mempool" class="stat-value">-</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Registered Accounts</span>
+            <span id="accCount" class="stat-value">-</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Latest Block Hash</span>
+            <span id="lastHash" class="stat-value" style="font-size: 11px; color: var(--text-dim);">-</span>
+        </div>
+    </div>
+
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 40%;">Address</th>
+                    <th style="width: 15%; text-align: center;">Nonce</th>
+                    <th style="width: 45%;">Asset Balances</th>
+                </tr>
+            </thead>
+            <tbody id="accountTable">
+                <tr><td colspan="3" style="text-align:center; padding: 40px; color: var(--text-dim);">Connecting to RPC Node...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    /**
+     * BigInt를 사용하여 소수점 18자리를 수동으로 계산하는 함수 (정밀도 유지)
+     */
+    function formatUnits(rawValue, decimals) {
+        try {
+            let s = BigInt(rawValue).toString();
+            // 소수점 자리수보다 짧으면 앞에 0 채우기
+            while (s.length <= decimals) s = "0" + s;
+            
+            let integerPart = s.slice(0, -decimals);
+            let fractionalPart = s.slice(-decimals).replace(/0+$/, ""); // 뒤쪽 0 제거
+            
+            // 천 단위 콤마 추가
+            integerPart = BigInt(integerPart).toLocaleString();
+            
+            return fractionalPart.length > 0 ? `${integerPart}.${fractionalPart}` : integerPart;
+        } catch (e) {
+            return "0";
+        }
+    }
+
+    async function fetchState() {
+        const RPC_URL = "http://localhost:10000/dashboard/state";
+        
+        try {
+            const response = await fetch(RPC_URL);
+            if (!response.ok) throw new Error("Offline");
+            const data = await response.json();
+
+            // 1. 상단 정보 업데이트
+            document.getElementById('height').innerText = data.height;
+            document.getElementById('mempool').innerText = data.mempool_count;
+            document.getElementById('accCount').innerText = Object.keys(data.accounts).length;
+            document.getElementById('lastHash').innerText = data.last_block_hash;
+
+            const tableBody = document.getElementById('accountTable');
+            tableBody.innerHTML = '';
+
+            // 2. 계정 데이터 파싱
+            for (const [addr, info] of Object.entries(data.accounts)) {
+                const tr = document.createElement('tr');
+                
+                // 잔고 영역 생성
+                let balancesHtml = "";
+                if (info.balances && Object.keys(info.balances).length > 0) {
+                    for (const [symbol, val] of Object.entries(info.balances)) {
+                        const ticker = symbol.toUpperCase();
+                        const tickerClass = `ticker-${ticker.toLowerCase()}`;
+                        // 백엔드에서 온 16진수 문자열을 18자리 소수점으로 변환
+                        const formattedAmount = formatUnits(val, 18);
+
+                        balancesHtml += `
+                            <div class="balance-item">
+                                <span class="ticker-badge ${tickerClass}">${ticker}</span>
+                                <span class="amount-val">${formattedAmount}</span>
+                            </div>`;
+                    }
+                } else {
+                    balancesHtml = '<span style="color: var(--text-dim); font-style: italic;">No Assets</span>';
+                }
+
+                tr.innerHTML = `
+                    <td><span class="address">${addr}</span></td>
+                    <td style="text-align: center;"><span class="nonce-badge">${info.nonce}</span></td>
+                    <td>${balancesHtml}</td>
+                `;
+                tableBody.appendChild(tr);
+            }
+        } catch (err) {
+            document.getElementById('accountTable').innerHTML = 
+                `<tr><td colspan="3" style="text-align:center; padding: 40px; color: #ef4444;">
+                    ⚠️ RPC Server Offline (Check localhost:10000)
+                </td></tr>`;
+        }
+    }
+
+    // 초기 실행 및 3초 주기 자동 갱신
+    fetchState();
+    setInterval(fetchState, 3000);
+</script>
+</body>
+</html>

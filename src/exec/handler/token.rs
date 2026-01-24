@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{block::{db::Storage, types::{Account, Address, GlobalBalance, StateDiff, TokenTicker}}, exec::schema::*};
+use crate::{block::{db::Storage, types::{Account, Address, Balance, GlobalBalance, StateDiff, TokenTicker}}, exec::schema::*};
 
 
 
@@ -8,8 +8,8 @@ pub fn handle_transfer(
     state: &mut GlobalBalance,
     from: Address,
     to: Address,
-    value: u64,
-    fee: u64,
+    value: Balance,
+    fee: Balance,
     params: serde_json::Value,
     cur_height: u64,
     db: &Storage
@@ -38,18 +38,22 @@ pub fn handle_transfer(
         if token_balance < value{
             return Err(format!("INSUFFICIENT_{token}_BALANCE"));
         }
-        if fee < min_gas {
+        if fee < Balance::from(min_gas) {
             return Err(format!("GAS FEE NEED {min_gas}"));
         }
     }
-
-    state.pay_gas(&from, fee, cur_height, db)?;
-    match state.sub_balance(&from, token, value, cur_height, db){
-        Ok(()) => state.add_balance(&to, &token, value, cur_height, db),
-        Err(e) => return Err(e),
+    let gas_tkn = state.config.gas_token.clone();
+    {
+        let from_acc = state.get_account_mut(&from, cur_height, db);
+        from_acc.pay_gas(fee, &gas_tkn);
+        from_acc.sub_balance(&token, value);
+        from_acc.inc_nonce();
+    }
+    {
+        let to_acc = state.get_account_mut(&to, cur_height, db);
+        to_acc.add_balance(&token, value.saturating_sub(fee));
     }
 
-    state.inc_nonce(&from, cur_height, db);
     let mut changed_accounts = HashMap::new();
     changed_accounts.insert(to, state.get_account_read(&to, cur_height, db));
     changed_accounts.insert(from,state.get_account_read(&from, cur_height, db));

@@ -1,5 +1,5 @@
 use std::{collections::{HashMap, HashSet}, sync::Arc};
-use crate::{block::{transaction::ConfirmedTransaction, types::{Account, Address, BlockData}}, exec, network::{message::NetworkMessage, node::{self, Node, NodeManage}}};
+use crate::{block::{transaction::ConfirmedTransaction, types::{Account, Address, Balance, BlockData}}, exec, network::{message::NetworkMessage, node::{self, Node, NodeManage}}};
 use tokio::{sync::RwLock, time::{Duration, sleep}};
 
 impl NodeManage{
@@ -16,18 +16,21 @@ impl NodeManage{
 
 
             let my_address = node_lock.wallet;
-            let my_gov = global_state.gov_shares.get(&my_address).cloned().unwrap_or(0);
+            let my_gov = global_state.gov_shares.get(&my_address).cloned().unwrap_or(Balance::zero());
             let port = node_lock.port;
-            if port != 9000{
+            if node_lock.port != 9000{
                 println!("PERMISSION DENIED ");
                 continue;
             }
-            //트랜잭션 없으면 쉬는 로직도 필요할듯?
-            //if my_gov == 0{
-                //println!("PERMISSION DENIED");
-                //drop(node_lock);
-                //continue;
-            //}// 이외에도 POS 등 로직 넣어줘야하는곳. 현재 내가 마이닝노드인지 확인 알고리즘 필요함.
+            // if node_lock.mempool.is_empty(){
+                // println!("NO TRANSACTIONS");
+                // continue;
+            // }
+            // if my_gov == 0{
+                // println!("PERMISSION DENIED");
+                // drop(node_lock);
+                // continue;
+            // }// 이외에도 POS 등 로직 넣어줘야하는곳. 현재 내가 마이닝노드인지 확인 알고리즘 필요함.
         
             let mut valid_transactions = Vec::new();
             let keys: Vec<_>  = node_lock.mempool.keys().take(100).cloned().collect();
@@ -41,11 +44,13 @@ impl NodeManage{
                 
                 if !tx.verify(){
                     node_lock.mempool.remove(&key);
+                    println!("1");
                     continue;
                 }
 
                 match exec::apply_transaction(&mut global_state, &tx, next_height, &storage){
                     Ok(diff) => {
+                        println!("2");
                         node_lock.mempool.remove(&key);
                         valid_transactions.push(ConfirmedTransaction::from(&tx));
                         for (addr, acc) in diff.accounts{
@@ -56,6 +61,7 @@ impl NodeManage{
                         }
                     }
                     Err(e) => {
+                        println!("3");
                         println!("[MINER]: Transaction Exec failed {e}");
                         node_lock.mempool.remove(&key);
                     }

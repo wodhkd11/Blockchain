@@ -17,7 +17,7 @@ pub struct TokenInfo{
     pub name: String,
     pub symbol: TokenTicker,
     pub decimals: u8,
-    pub total_supply: u64,
+    pub total_supply: Balance,
     pub admin: Address,
 }
 // Block types
@@ -42,7 +42,7 @@ pub struct BlockData{
 // Account and Balance types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account{
-    pub balance: HashMap<TokenTicker, u64>, //Symbol, value
+    pub balance: HashMap<TokenTicker, Balance>, //Symbol, value
     pub nonce: u64,
     pub last_seen_block: u64,
 }
@@ -50,8 +50,8 @@ pub struct Account{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalBalance{
     pub balances: HashMap<Address, Account>,
-    pub gov_shares: HashMap<Address, u64>,
-    pub gas_pool: u64,
+    pub gov_shares: HashMap<Address, Balance>,
+    pub gas_pool: Balance,
     pub token_metadata: HashMap<TokenTicker, TokenInfo>,
     pub config: NetworkConfig,
 }
@@ -60,3 +60,16 @@ pub struct StateDiff{
     pub accounts: HashMap<Address, Account>,
     pub token_changed: Option<TokenTicker>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionForDB{
+    pub hash: Hash,
+    pub block_height: u64,
+    pub block_hash: Hash,
+    pub index: u32,
+    pub status: u8,
+}
+
+pub type Balance = primitive_types::U256;
+pub type Nonce = u64;
+

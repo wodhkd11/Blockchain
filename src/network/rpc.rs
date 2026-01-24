@@ -1,4 +1,5 @@
 use axum::{Json, Router, extract::{Path, State}, http::StatusCode, response::IntoResponse, routing::{post, get}};
+use primitive_types::U256;
 use reqwest::Method;
 use serde::Deserialize;
 use serde_json::json;
@@ -6,7 +7,7 @@ use serde_with::serde_as;
 use sha3::{Digest, Keccak256};
 use tower_http::cors::{Any, CorsLayer};
 use std::{collections::HashMap, sync::Arc};
-use crate::{block::{types::Hash, transaction::TransactionData}, network::{message::NetworkMessage, node::NodeManage}};
+use crate::{block::{types::{Balance, Hash}, transaction::TransactionData}, network::{message::NetworkMessage, node::NodeManage}};
 use hex;
 
 #[derive(Deserialize, Debug)]
@@ -21,7 +22,7 @@ struct RpcRequest{
 pub struct TransactionRequest{
     pub sender: [u8; 20],
     pub receiver: [u8; 20],
-    pub value: u64,
+    pub value: Balance,
     pub nonce: u64,
     pub payload: Vec<u8>,
     #[serde_as(as = "[_; 65]")]
@@ -38,6 +39,8 @@ pub async fn start_rpc_server(manager: Arc<NodeManage>, rpc_port: u16){
         .route("/", post(handle_eth_request))
         .route("/transaction", post(handle_tx_submission))
         .route("/nonce/{address}", get(get_nonce_handler))
+        .route("/dashboard/state", get(get_all_state_handler))
+        .route("/admin", post(update_network_config))
         .layer(cors)
         .with_state(manager);
     let addr = format!("0.0.0.0:{}", rpc_port);
@@ -91,11 +94,11 @@ async fn handle_eth_request(
             let balance = state.global_state.read().await.balances.get(&address)
                 .and_then(|acc| acc.balance.get(&"GOV".to_string()))
                 .cloned()
-                .unwrap_or(0);
+                .unwrap_or(Balance::zero());
 
             // [핵심] 메타마스크 18자리 소수점 보정 (1 GOV -> 10^18 wei)
-            let display_balance = balance as u128 * 10_u128.pow(18);
-            let test_balance= 777_u128 * 10_u128.pow(18);
+            let display_balance = balance * Balance::from(10).pow(Balance::from(18));
+            let test_balance = Balance::from(777) * Balance::from(10).pow(Balance::from(18));
 
             Json(json!({
                 "jsonrpc": "2.0",
@@ -126,10 +129,10 @@ async fn handle_eth_request(
                 let balance = state.global_state.read().await.balances.get(&user_addr)
                     .and_then(|acc| acc.balance.get(&token_symbol.to_string()))
                     .cloned()
-                    .unwrap_or(0);
+                    .unwrap_or(Balance::zero());
 
                 // [핵심] 토큰도 18자리 보정 + 32바이트 패딩 응답
-                let display_balance = balance as u128 * 10_u128.pow(18);
+                let display_balance = balance * Balance::from(10).pow(Balance::from(18));
                 return Json(json!({
                     "jsonrpc": "2.0",
                     "id": req.id,
@@ -252,7 +255,8 @@ impl TransactionRequest{
         let mut v = Vec::new();
         v.extend_from_slice(&self.sender);
         v.extend_from_slice(&self.receiver);
-        v.extend_from_slice(&self.value.to_be_bytes());
+        let value_bytes: [u8; 32] = self.value.to_big_endian();
+        v.extend_from_slice(&value_bytes);
         v.extend_from_slice(&self.nonce.to_be_bytes());
         v.extend_from_slice(&self.payload);
 
@@ -260,102 +264,64 @@ impl TransactionRequest{
     }
 }
 
-
-
-
-
-
-//async fn handle_eth_request(
-    //State(manager): State<Arc<NodeManage>>,
-    //Json(req): Json<RpcRequest>,
-//) -> impl IntoResponse{
-    //println!("{:?}", req);
-    //match req.method.as_str(){
-        //"eth_chainId" => {
-            //let chain_id = {manager.state.read().await.chain_id};
-            //Json(json!({
-                //"jsonrpc": "2.0",
-                //"id": req.id,
-                //"result": format!("0x{:x}", chain_id)
-            //}))
-        //},
-        //"eth_blockNumber" => {
-            //let height = { manager.state.read().await.block_height };
-            //Json(json!({
-                //"jsonrpc": "2.0",
-                //"id": req.id,
-                //"result": format!("0x{:x}", height) // 반드시 16진수 format
-            //}))
-        //},
-        //"not_version" => {
-            //let chain_id = {manager.state.read().await.chain_id};
-            //Json(json!({
-                //"jsonrpc": "2.0",
-                //"id": req.id,
-                //"result": chain_id.to_string()
-            //}))
-        //},
-        //"eth_getBalance" => {
-            //let addr_str = req.params.get(0).and_then(|v| v.as_str()).unwrap_or("");
-            //let address = hex_to_address(&addr_str.to_string());
-            //let state = manager.state.read().await;
-            //let balance = state.global_state.balances.get(&address)
-                //.and_then(|acc| acc.balance.get(&"GOV".to_string()))
-                //.cloned()
-                //.unwrap_or(0);
-            //Json(json!({
-                //"jsonrpc": "2.0",
-                //"id": req.id,
-                //"result": format!("0x{:x}", balance)
-            //}))
-        //},
-        //"eth_call" => {
-            //let Some(params) = req.params.get(0) else {
-                //return Json(json!({"jsonrpc": "2.0", "id": req.id, "error": "no params"})).into_response();
-            //};
-
-            //// 2. to_address 추출 에러 수정 (and_then은 Option을 반환해야 함)
-            //let to_address = params.get("to").and_then(|v| v.as_str()).unwrap_or("");
-            //let data = params.get("data").and_then(|v| v.as_str()).unwrap_or("");
-
-            //// 3. balanceOf(address) 요청 처리 (0x70a08231)
-            //if data.starts_with("0x70a08231") || data.starts_with("70a08231") {
-                //// data가 0x로 시작할 경우와 아닐 경우를 대비해 오프셋 조정
-                //let offset = if data.starts_with("0x") { 34 } else { 32 };
-        
-                //// 주소 파싱 시 범위 초과 방지
-                //if data.len() >= offset + 40 {
-                    //let user_addr_str = &data[offset..offset + 40];
-                    //let user_addr = hex_to_address(&user_addr_str.to_string());
-            
-                    //let state = manager.state.read().await;
-            
-                    //// 4. 토큰 주소 매핑 (소문자로 변환하여 비교하는 것이 안전)
-                    //let token_symbol = match to_address.to_lowercase().as_str() {
-                        //"0x0000000000000000000000000000000000000001" => "KRW",
-                        //_ => "GOV",
-                    //};
-
-                    //let balance = state.global_state.balances.get(&user_addr)
-                        //.and_then(|acc| acc.balance.get(&token_symbol.to_string()))
-                        //.cloned()
-                        //.unwrap_or(0);
-
-                    //return Json(json!({
-                        //"jsonrpc": "2.0",
-                        //"id": req.id,
-                        //"result": format!("0x{:0>64x}", balance)
-                    //})).into_response();
-                //}
-            //}
+async fn update_network_config() {
     
-            //// 기본 응답 (메타마스크 에러 방지용)
-            //Json(json!({
-                //"jsonrpc": "2.0", 
-                //"id": req.id, 
-                //"result": "0x0000000000000000000000000000000000000000000000000000000000000000"
-            //}))
-        //},
-        //_ => Json(json!({"jsonrpc": "2.0", "id": req.id, "error": {"code": 032601, "message": "Method not found"}})),
-    //}.into_response()
-//}
+}
+
+async fn get_all_state_handler(
+    State(manager): State<Arc<NodeManage>>,
+) -> impl IntoResponse {
+    let node_state = manager.state.read().await;
+    let global_state = node_state.global_state.read().await;
+
+    // 계정 주소와 각 계정의 잔고 맵을 정리하여 반환
+    let mut accounts_info = HashMap::new();
+    
+    // global_state.balances는 HashMap<Address, Account> 형태라고 가정합니다.
+    for (address, account) in &global_state.balances {
+        let addr_hex = format!("0x{}", hex::encode(address));
+        let mut formatted_balances = HashMap::new();
+
+        for (symbol, val) in &account.balance {
+            formatted_balances.insert(symbol.clone(),format!("0x{:x}", val));
+        }
+
+        accounts_info.insert(addr_hex, json!({
+            "nonce": account.nonce,
+            "balances": formatted_balances
+        }));
+    }
+
+    Json(json!({
+        "height": node_state.block_height,
+        "mempool_count": node_state.mempool.len(),
+        "accounts": accounts_info,
+        "last_block_hash": format!("0x{}", hex::encode(node_state.last_block.hash))
+    }))
+}
+
+// async fn get_all_state_handler(
+//     State(manager): State<Arc<NodeManage>>,
+// ) -> impl IntoResponse {
+//     let node_state = manager.state.read().await;
+//     let global_state = node_state.global_state.read().await;
+
+//     // 계정 주소와 각 계정의 잔고 맵을 정리하여 반환
+//     let mut accounts_info = HashMap::new();
+    
+//     // global_state.balances는 HashMap<Address, Account> 형태라고 가정합니다.
+//     for (address, account) in &global_state.balances {
+//         let addr_hex = format!("0x{}", hex::encode(address));
+//         accounts_info.insert(addr_hex, json!({
+//             "nonce": account.nonce,
+//             "balances": account.balance // HashMap<String, u64>
+//         }));
+//     }
+
+//     Json(json!({
+//         "height": node_state.block_height,
+//         "mempool_count": node_state.mempool.len(),
+//         "accounts": accounts_info,
+//         "last_block_hash": format!("0x{}", hex::encode(node_state.last_block.hash))
+//     }))
+// }

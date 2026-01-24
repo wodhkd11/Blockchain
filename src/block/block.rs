@@ -33,7 +33,8 @@ impl BlockData{
             signature: signature,
         }
     }
-
+    
+    //특정 인덱스의 머클루트를 계산하기 위해 인덱스를 주면 해당 인덱스를 증명하기 위한 해시값들을 반환한느 함수가 필요함.
     pub fn calculate_merkle_root(transactions: &Vec<ConfirmedTransaction>) -> [u8;32]{
         if transactions.is_empty(){return [0u8;32];}
         let mut hashes: Vec<[u8;32]> = transactions

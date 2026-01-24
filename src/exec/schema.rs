@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::block::types::{Address, TokenTicker};
+use crate::{block::types::{Address, Balance, TokenTicker}, rule::config::NetworkConfig};
 
 
 
@@ -9,7 +9,7 @@ pub struct RegisterTokenParams{
     pub name: String,
     pub symbol: TokenTicker,
     pub admin: Address,
-    pub initial_supply: u64, //
+    pub initial_supply: Balance, //
     pub decimals: u8,
 }
 
@@ -23,6 +23,13 @@ pub struct MintParams{
     pub ticker: TokenTicker,
 }
 
+
+#[derive(Deserialize, Serialize)]
+pub struct ChangeConfig{
+    pub min_gas_price: Option<Balance>,
+    pub gas_token: Option<String>,
+    pub governance_threshold: Option<Balance>,
+}
 
 //pub fn MintParams{}
 //pub fn BurnParams{}
