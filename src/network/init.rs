@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, sync::{Arc, LazyLock}};
 use primitive_types::U256;
 use tokio::sync::RwLock;
 
-use crate::{block::{db::Storage, genesis::*, types::{Balance, BlockData, GlobalBalance, TokenInfo}}, network::node::*};
+use crate::{block::{db::Storage, genesis::*, types::{Balance, BlockData, GlobalBalance, TokenInfo}}, network::node::*, state::statemanager::StateManager};
 
 pub static DECIMALS_POW: LazyLock<U256> = LazyLock::new(|| {
     U256::from(10).pow(U256::from(18))
@@ -21,15 +21,18 @@ impl NodeManage{
         let last_block = if storage.is_empty(){
             if is_genesis {
                 println!("I am genesis NODE");
-                let g = BlockData::create_genesis_block(wallet);
-                g
+                BlockData::create_genesis_block(wallet)
             }else{
                 println!("[NODE]: Load Genesis setting");
                 GENESIS_BLOCK.clone()
             }
         } else{ storage.get_latest_block().unwrap() };
-        let block_height = last_block.header.height;
+
+        let state_root = last_block.header.state_root;
+        let state_manager = Arc::new(RwLock::new(StateManager::new(storage.clone(), state_root).expect("MPT ERROR")));
+
         let mut global_state = GlobalBalance::new();
+
         let owner = hex::decode("0fa41b6927a59eccb1f253a62e0164b5ce96f7c5")
             .expect("");
         let mut owner_addr = [0u8;20];
@@ -52,19 +55,21 @@ impl NodeManage{
             admin: owner_addr,
         });
         global_state.gov_shares.insert(owner_addr, *TOTAL_SUPPLY);
-        let admin = global_state.get_account_mut(&owner_addr, 0, &storage);
+        let admin = global_state.get_account_safe(&owner_addr, 0, &storage);
         admin.add_balance(&"GOV".to_string(), *TOTAL_SUPPLY);
 // 1. 100000을 U256으로 먼저 변환
 // 2. 그 다음 U256끼리 곱하기 (checked_mul 사용)
-let initial_krw = U256::from(100_000)
-    .checked_mul(*DECIMALS_POW)
-    .expect("KRW supply overflow");
+        let initial_krw = U256::from(100_000)
+            .checked_mul(*DECIMALS_POW)
+            .expect("KRW supply overflow");
 
-admin.add_balance(&"KRW".to_string(), initial_krw);        
+        admin.add_balance(&"KRW".to_string(), initial_krw);        
 
+
+        let block_height = last_block.header.height;
+        let block_hash = last_block.hash;
 
         let genesis = &*GENESIS_BLOCK;
-
         println!("{:?}",genesis.hash) ;              
         Self { 
             state: Arc::new(RwLock::new(Node{
@@ -79,8 +84,9 @@ admin.add_balance(&"KRW".to_string(), initial_krw);
                 mempool: HashMap::new(),
                 global_state: Arc::new(global_state.into()),
                 storage,
+                state_manager,
                 last_block: genesis.clone(),
-                block_height: 0,
+                block_height,
             })),
          }
     }

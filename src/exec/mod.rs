@@ -10,7 +10,7 @@ use std::{collections::{HashMap, HashSet}, fmt::format};
 use primitive_types::U256;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
-use crate::{block::{db::Storage, transaction::TransactionData, types::{Account, Address, Balance, BlockData, GlobalBalance, StateDiff, TokenTicker}}, exec::{handler::{admin::config_update, mint::handle_mint, system::register_token, token::handle_transfer}, opcodes::*}};
+use crate::{block::{db::Storage, transaction::TransactionData, types::{Account, Address, Balance, BlockData, GlobalBalance, StateDiff, TokenTicker}}, exec::{decoder::decode_payload, handler::{admin::config_update, mint::handle_mint, system::register_token, token::handle_transfer}, opcodes::*, schema::RawPayload}};
 
 // pub enum Instruction{
     // RegisterToken(RegisterTokenParams),
@@ -42,21 +42,13 @@ pub const OP_TOKEN_TRANSFER: u8 = 0x02;
 pub const OP_TOKEN_BURN: u8 = 0x03;
 pub const OP_PAY_PURCHASE: u8 = 0x04;
  */
-#[serde_as]
-#[derive(Deserialize)]
-pub struct RawPayload{
-    pub opcode: u8,
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub fee: Option<Balance>,
-    pub data: serde_json::Value,
-}
+
 
 pub fn apply_transaction(state: &mut GlobalBalance, tx: &TransactionData, cur_height: u64, db:&Storage)
  -> Result<StateDiff, String>{
     //let current_config = &state.config; //권환관련되서 로직해야됨
 
-    let raw_payload: RawPayload = serde_json::from_slice(&tx.payload)
-        .map_err(|_| "Invalid Payload JSON")?;
+    let raw_payload: RawPayload = decode_payload(&tx.payload)?;
     let opcode = raw_payload.opcode;
     // let f = raw_payload.fee;
     // let fee = match f{

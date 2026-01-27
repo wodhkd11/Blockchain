@@ -25,27 +25,27 @@ pub fn handle_mint(
 
     if !state.token_metadata.contains_key(&token){ return Err("Unsupported tokena".into()); }
 
-    let gas_token_balance = state.get_token_balance(&from, &gas_token, cur_height, db);
+    let gas_token_balance = state.get_token_balance_safe(&from, &gas_token, cur_height, db).map_err(|e| format!("{:?}", e))?;
     if gas_token_balance < fee || fee < Balance::from(min_gas) { return Err("Insufficient balance for gas fee".into()); }
 
-    let gov_balance = state.get_token_balance(&from, &gov_token, cur_height, db);
+    let gov_balance = state.get_token_balance_safe(&from, &gov_token, cur_height, db).map_err(|e| format!("{:?}", e))?;
     
     if gov_balance < Balance::from(gov_threshold) {
         return Err("[GOVERNANCE]: Permission Denied".into());
     }
     let gas_tkn = state.config.gas_token.clone();
     {
-        let from_acc = state.get_account_mut(&from, cur_height, db);
+        let from_acc = state.get_account_safe(&from, cur_height, db);
         from_acc.pay_gas(fee, &gas_tkn);
         from_acc.inc_nonce();
     }
     {
-        let to_acc = state.get_account_mut(&to, cur_height, db);
+        let to_acc = state.get_account_safe(&to, cur_height, db);
         to_acc.add_balance(&token, value - fee);
     }
     let mut changed_accounts = HashMap::new();
-    changed_accounts.insert(to, state.get_account_read(&to, cur_height, db));
-    changed_accounts.insert(from, state.get_account_read(&from, cur_height, db));
+    changed_accounts.insert(to, state.get_account_read_safe(&to, cur_height, db).map_err(|e| format!("{:?}", e))?);
+    changed_accounts.insert(from, state.get_account_read_safe(&from, cur_height, db).map_err(|e| format!("{:?}", e))?);
     Ok(StateDiff{
         accounts: changed_accounts,
         token_changed: Some(token),

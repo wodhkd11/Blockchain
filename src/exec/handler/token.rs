@@ -25,7 +25,11 @@ pub fn handle_transfer(
     if !state.token_metadata.contains_key(token){
         return Err("Unsupported token".into());
     }
-    let gas_balance = state.get_token_balance(&from, &gas_token, cur_height, db);
+
+    let from_acc = state.get_account_safe(&from, cur_height, db);
+    let gas_balance = state.get_token_balance_safe(&from, &gas_token, cur_height, db)
+        .map_err(|e| format!("{:?}", e))?;
+
     if token == &gas_token {
         if gas_balance < value.saturating_add(fee){
             return Err("INSUFFICIENT_KRW".into());
@@ -34,7 +38,8 @@ pub fn handle_transfer(
         if gas_balance < fee{
             return Err("INSUFFICIENT_GAS".into());
         }
-        let token_balance = state.get_token_balance(&from, token, cur_height, db);
+        let token_balance = state.get_token_balance_safe(&from, token, cur_height, db)
+            .map_err(|e| format!("{:?}", e))?;
         if token_balance < value{
             return Err(format!("INSUFFICIENT_{token}_BALANCE"));
         }
@@ -43,20 +48,21 @@ pub fn handle_transfer(
         }
     }
     let gas_tkn = state.config.gas_token.clone();
+    
     {
-        let from_acc = state.get_account_mut(&from, cur_height, db);
+        let from_acc = state.get_account_safe(&from, cur_height, db);
         from_acc.pay_gas(fee, &gas_tkn);
-        from_acc.sub_balance(&token, value);
+        from_acc.sub_balance(&token, value.saturating_sub(fee));
         from_acc.inc_nonce();
     }
     {
-        let to_acc = state.get_account_mut(&to, cur_height, db);
+        let to_acc = state.get_account_safe(&to, cur_height, db);
         to_acc.add_balance(&token, value.saturating_sub(fee));
     }
 
     let mut changed_accounts = HashMap::new();
-    changed_accounts.insert(to, state.get_account_read(&to, cur_height, db));
-    changed_accounts.insert(from,state.get_account_read(&from, cur_height, db));
+    changed_accounts.insert(to, state.get_account_read_safe(&to, cur_height, db).map_err(|e| format!("{:?}", e))?);
+    changed_accounts.insert(from,state.get_account_read_safe(&from, cur_height, db).map_err(|e| format!("{:?}", e))?);
     Ok(StateDiff{
         accounts: changed_accounts,
         token_changed: None,

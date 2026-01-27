@@ -1,193 +1,439 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <title>Rust Chain Admin Panel v3</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MPT Chain Console v2</title>
     <style>
-        body { font-family: 'Consolas', monospace; background: #0f0f0f; color: #00ff00; padding: 20px; }
-        .container { max-width: 900px; margin: auto; background: #1a1a1a; padding: 25px; border-radius: 10px; border: 1px solid #333; }
-        .section { background: #222; padding: 15px; margin-bottom: 20px; border-radius: 8px; border-left: 5px solid #00ff00; }
-        h2, h3 { margin-top: 0; color: #00ff00; text-align: center; }
-        .input-group { margin-bottom: 10px; display: flex; align-items: center; }
-        label { width: 140px; font-size: 0.9em; color: #888; }
-        input { flex: 1; padding: 8px; border-radius: 4px; border: 1px solid #444; background: #000; color: #00ff00; }
-        button { padding: 12px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.2s; width: 100%; }
-        #connectBtn { background: #e67e22; color: white; margin-bottom: 20px; }
-        .action-btn { background: #27ae60; color: white; margin-top: 10px; }
-        button:disabled { background: #333; color: #666; cursor: not-allowed; }
-        #log { background: #000; color: #00ff00; padding: 15px; border-radius: 5px; height: 250px; overflow-y: auto; font-size: 12px; border: 1px solid #333; margin-top: 20px; white-space: pre-wrap; }
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #e2e8f0;
+            --accent: #3b82f6;
+            --success: #22c55e;
+            --error: #ef4444;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .card {
+            background: var(--card);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            border: 1px solid #334155;
+        }
+
+        .full-width {
+            grid-column: span 2;
+        }
+
+        h2,
+        h3 {
+            margin-top: 0;
+            color: var(--accent);
+            border-bottom: 1px solid #334155;
+            padding-bottom: 10px;
+        }
+
+        input,
+        select,
+        button {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: white;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+
+        button {
+            background: var(--accent);
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+            border: none;
+        }
+
+        button:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .btn-green {
+            background: var(--success);
+            color: #000;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .col {
+            flex: 1;
+        }
+
+        pre {
+            background: #000;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 11px;
+            max-height: 400px;
+            border: 1px solid #333;
+            color: #0f0;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .connected {
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+        }
+
+        .disconnected {
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+        }
+
+        label {
+            font-size: 0.85em;
+            color: #94a3b8;
+            font-weight: 600;
+            display: block;
+            margin-top: 10px;
+        }
+
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
+
 <body>
 
-<div class="container">
-    <h2>⛓️ RUST CHAIN TOTAL ADMIN</h2>
-    
-    <button id="connectBtn">1. WALLET CONNECT (METAMASK)</button>
+    <div class="container">
+        <div class="card full-width">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2>🚀 MPT Chain Console</h2>
+                <div id="connectionStatus" class="status-badge disconnected">Disconnected</div>
+            </div>
+            <div class="row">
+                <div class="col">
+                    <button id="connectBtn">🔌 Connect Wallet</button>
+                </div>
+                <div class="col">
+                    <button id="refreshBtn" class="btn-green">🔄 Refresh Network State</button>
+                </div>
+            </div>
+            <div class="row" style="margin-top: 10px; font-size: 14px;">
+                <div class="col"><strong>My Address:</strong> <span id="myAddr">-</span></div>
+                <div class="col"><strong>Chain ID:</strong> <span id="chainId">-</span></div>
+                <div class="col"><strong>Block Height:</strong> <span id="blockHeight">-</span></div>
+            </div>
+        </div>
 
-    <div class="section">
-        <h3>💸 TRANSFER (Opcode 0x02)</h3>
-        <div class="input-group"><label>To Address</label><input type="text" id="txReceiver" value="0x0000000000000000000000000000000000000000"></div>
-        <div class="input-group"><label>Amount</label><input type="text" id="txAmount" value="10.0"></div>
-        <div class="input-group"><label>Ticker</label><input type="text" id="txTicker" value="KRW"></div>
-        <button class="action-btn" onclick="executeTx(2)" disabled>SEND TRANSACTION</button>
+        <!-- Transaction Form -->
+        <div class="card">
+            <h3>💸 Send Transaction</h3>
+
+            <label>Operation Type (Opcode)</label>
+            <select id="opType" onchange="toggleFields()">
+                <option value="0x02">TOKEN_TRANSFER (0x02)</option>
+                <option value="0x01">TOKEN_MINT (0x01)</option>
+                <option value="0x03">TOKEN_BURN (0x03)</option>
+                <option value="0x00">REGISTER_TOKEN (0x00)</option>
+                <option value="0xFF">UPDATE_CONFIG (0xFF)</option>
+            </select>
+
+            <div id="standardFields">
+                <label>Receiver Address</label>
+                <input type="text" id="txReceiver" placeholder="0x..."
+                    value="0x0000000000000000000000000000000000000000">
+
+                <div class="row">
+                    <div class="col">
+                        <label>Amount</label>
+                        <input type="text" id="txAmount" placeholder="10" value="100">
+                    </div>
+                    <div class="col" id="tickerField">
+                        <label>Ticker</label>
+                        <input type="text" id="txTicker" placeholder="KRW" value="KRW">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Opcode 0x00: Register Token -->
+            <div id="registerFields" class="hidden">
+                <label>Token Name</label>
+                <input type="text" id="regName" placeholder="My Awesome Token">
+                <label>Token Symbol</label>
+                <input type="text" id="regSymbol" placeholder="MAT">
+                <label>Admin Address</label>
+                <input type="text" id="regAdmin" placeholder="0x...">
+                <div class="row">
+                    <div class="col">
+                        <label>Initial Supply</label>
+                        <input type="text" id="regSupply" value="1000000">
+                    </div>
+                    <div class="col">
+                        <label>Decimals</label>
+                        <input type="number" id="regDecimals" value="18">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Opcode 0xFF: Config -->
+            <div id="configFields" class="hidden">
+                <label>Min Gas Price</label>
+                <input type="text" id="cfgMinGas" placeholder="0.001">
+                <label>Gas Token Ticker</label>
+                <input type="text" id="cfgGasToken" placeholder="GOV">
+                <label>Governance Threshold</label>
+                <input type="text" id="cfgGovThreshold" placeholder="1000">
+            </div>
+
+            <button id="sendBtn">✍️ Sign & Send</button>
+            <div id="txResult" style="margin-top: 10px; font-size: 13px;"></div>
+        </div>
+
+        <!-- Lookups -->
+        <div class="card">
+            <h3>🔍 Lookups</h3>
+            <label>Target Address</label>
+            <input type="text" id="lookupAddr" placeholder="0x...">
+
+            <div class="row">
+                <button onclick="checkBalance('GOV')" style="background:#555;">GOV</button>
+                <button onclick="checkBalance('KRW')" style="background:#555;">KRW</button>
+                <button onclick="checkNonce()" style="background:#555;">Nonce</button>
+            </div>
+            <pre id="lookupResult">Results here...</pre>
+        </div>
+
+        <!-- Network State -->
+        <div class="card full-width">
+            <h3>🌐 Global State Dump (/dashboard/state)</h3>
+            <pre id="stateDump">Refresh to load...</pre>
+        </div>
     </div>
 
-    <div class="section">
-        <h3>💎 REGISTER TOKEN (Opcode 0x00)</h3>
-        <div class="input-group"><label>Token Name</label><input type="text" id="regName" value="Governance Token"></div>
-        <div class="input-group"><label>Symbol</label><input type="text" id="regTicker" value="GOV"></div>
-        <div class="input-group"><label>Initial Supply</label><input type="text" id="regSupply" value="1000000"></div>
-        <button class="action-btn" onclick="executeTx(0)" disabled>REGISTER ASSET</button>
-    </div>
+    <script>
+        const RPC_URL = "http://localhost:10000";
+        let userAccount = null;
 
-    <div class="section">
-        <h3>🖨️ MINT TOKEN (Opcode 0x01)</h3>
-        <div class="input-group"><label>Target Address</label><input type="text" id="mintReceiver" value="0x0000000000000000000000000000000000000000"></div>
-        <div class="input-group"><label>Ticker</label><input type="text" id="mintTicker" value="GOV"></div>
-        <div class="input-group"><label>Amount</label><input type="text" id="mintAmount" value="500.0"></div>
-        <button class="action-btn" onclick="executeTx(1)" disabled>MINT ASSET</button>
-    </div>
+        // --- UI LOGIC ---
+        function toggleFields() {
+            const op = document.getElementById('opType').value;
+            document.getElementById('standardFields').className = (op === '0xFF' || op === '0x00') ? 'hidden' : '';
+            document.getElementById('registerFields').className = (op === '0x00') ? '' : 'hidden';
+            document.getElementById('configFields').className = (op === '0xFF') ? '' : 'hidden';
 
-    <div id="log">SYSTEM: Waiting for connection...</div>
-</div>
-
-<script>
-    let userAddress = "";
-    const RPC_URL = "http://localhost:10000";
-
-    function addLog(msg) {
-        const log = document.getElementById('log');
-        log.innerText += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-        log.scrollTop = log.scrollHeight;
-    }
-
-    function hexToBytes(hex) {
-        hex = hex.replace(/^0x/i, '');
-        const bytes = new Uint8Array(hex.length / 2);
-        for (let i = 0; i < hex.length; i += 2) bytes[i/2] = parseInt(hex.substr(i, 2), 16);
-        return bytes;
-    }
-
-    function bytesToHex(bytes) {
-        return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-
-    // Balance (U256) -> 32 Bytes Big Endian
-    function toU256Bytes(amountStr) {
-        // 1. 입력값을 소수점 기준으로 나눔
-    let [integer, fraction = ""] = amountStr.split(".");
-    
-    // 2. 소수점 아래를 18자리로 맞춤 (부족하면 0으로 채움)
-    fraction = fraction.padEnd(18, "0").slice(0, 18);
-    
-    // 3. 정수부와 소수부를 합쳐서 하나의 거대한 숫자로 만듦
-    const fullAmountStr = integer + fraction;
-    const val = BigInt(fullAmountStr);
-    
-    addLog(`DEBUG: Raw Amount sent to Backend: ${val.toString()}`);
-    return hexToBytes(val.toString(16).padStart(64, '0'));
-   }
-
-    // u64 -> 8 Bytes Big Endian
-    function toU64Bytes(num) {
-        const buf = new ArrayBuffer(8);
-        new DataView(buf).setBigUint64(0, BigInt(num), false);
-        return new Uint8Array(buf);
-    }
-
-    document.getElementById('connectBtn').onclick = async () => {
-        if (!window.ethereum) return alert("MetaMask not found.");
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        userAddress = accounts[0];
-        addLog(`CONNECTED: ${userAddress}`);
-        document.querySelectorAll('.action-btn').forEach(btn => btn.disabled = false);
-    };
-
-    async function executeTx(opcode) {
-        try {
-            // 1. Get Nonce
-            const nonceRes = await fetch(`${RPC_URL}/nonce/${userAddress}`);
-            const nonce = await nonceRes.json();
-
-            let receiver = "0x0000000000000000000000000000000000000000";
-            let amount = "0";
-            let payloadData = {};
-
-            // 백엔드 Schema 구조에 정밀 매칭
-            if (opcode === 2) { // handle_transfer
-                receiver = document.getElementById('txReceiver').value;
-                amount = document.getElementById('txAmount').value;
-                payloadData = { ticker: document.getElementById('txTicker').value };
-            } 
-            else if (opcode === 0) { // register_token
-                receiver = "0x0000000000000000000000000000000000000000";
-                amount = "0";
-                payloadData = { 
-                    name: document.getElementById('regName').value,
-                    symbol: document.getElementById('regTicker').value,
-                    admin: Array.from(hexToBytes(userAddress)), // [중요] expected array of length 20 해결
-                    initial_supply: "0x" + bytesToHex(toU256Bytes(document.getElementById('regSupply').value)),
-                    decimals: 18
-                };
-            } 
-            else if (opcode === 1) { // handle_mint
-                receiver = document.getElementById('mintReceiver').value; // 입금 받을 주소 (to)
-                amount = document.getElementById('mintAmount').value;     // 발행량 (value)
-                payloadData = { ticker: document.getElementById('mintTicker').value };
-            }
-
-            const payloadObj = {
-                opcode: opcode,
-                fee: "0x0",
-                data: payloadData
-            };
-
-            // 2. 바이트 직렬화 (20 + 20 + 32 + 8 + 가변)
-            const senderBytes = hexToBytes(userAddress);
-            const receiverBytes = hexToBytes(receiver);
-            const valueBytes = toU256Bytes(amount);
-            const nonceBytes = toU64Bytes(nonce);
-            const payloadBytes = new TextEncoder().encode(JSON.stringify(payloadObj));
-
-            const message = new Uint8Array(20 + 20 + 32 + 8 + payloadBytes.length);
-            let offset = 0;
-            message.set(senderBytes, offset); offset += 20;
-            message.set(receiverBytes, offset); offset += 20;
-            message.set(valueBytes, offset); offset += 32;
-            message.set(nonceBytes, offset); offset += 8;
-            message.set(payloadBytes, offset);
-
-            // 3. 서명 및 제출
-            addLog(`SIGNING: Opcode ${opcode} (Size: ${message.length})...`);
-            const sig = await window.ethereum.request({
-                method: 'personal_sign',
-                params: ["0x" + bytesToHex(message), userAddress],
-            });
-
-            const txRequest = {
-                sender: Array.from(senderBytes),
-                receiver: Array.from(receiverBytes),
-                value: "0x" + bytesToHex(valueBytes),
-                nonce: nonce,
-                payload: Array.from(payloadBytes),
-                signature: Array.from(hexToBytes(sig))
-            };
-
-            const res = await fetch(`${RPC_URL}/transaction`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(txRequest)
-            });
-
-            const txHash = await res.json();
-            addLog(`SUCCESS: TxHash ${bytesToHex(new Uint8Array(txHash))}`);
-
-        } catch (err) {
-            addLog(`ERROR: ${err.message}`);
-            console.error(err);
+            // Receiver is needed for standard and register, but not config (usually)
+            // In the backend, config_update uses `to` for something? (Actually it ignores it)
         }
-    }
-</script>
+
+        // --- UTILS ---
+        const log = (elId, msg) => document.getElementById(elId).innerText = msg;
+        const cleanHex = (h) => h ? (h.startsWith('0x') ? h.slice(2) : h) : "";
+
+        const addrToArray = (addr) => {
+            const hex = cleanHex(addr).padStart(40, '0');
+            const bytes = [];
+            for (let i = 0; i < 20; i++) bytes.push(parseInt(hex.substr(i * 2, 2), 16));
+            return bytes;
+        };
+
+        const addrToBytes = (addr) => new Uint8Array(addrToArray(addr));
+
+        const toRawAmount = (humanAmount) => {
+            if (!humanAmount) return "0";
+            try {
+                const parts = humanAmount.toString().split('.');
+                let integerPart = BigInt(parts[0] || "0");
+                let fractionPart = parts[1] || "";
+                if (fractionPart.length > 18) fractionPart = fractionPart.slice(0, 18);
+                else fractionPart = fractionPart.padEnd(18, '0');
+                return (integerPart * 10n ** 18n + BigInt(fractionPart)).toString();
+            } catch (e) { return "0"; }
+        };
+
+        const u256ToBytes = (rawAmountStr) => {
+            const b = new Uint8Array(32);
+            let hex = BigInt(rawAmountStr).toString(16).padStart(64, '0');
+            for (let i = 0; i < 32; i++) b[i] = parseInt(hex.substr(i * 2, 2), 16);
+            return b;
+        };
+
+        const u64ToBytes = (num) => {
+            const b = new Uint8Array(8);
+            const hex = BigInt(num).toString(16).padStart(16, '0');
+            for (let i = 0; i < 8; i++) b[i] = parseInt(hex.substr(i * 2, 2), 16);
+            return b;
+        };
+
+        // --- CORE FUNCTIONS ---
+        document.getElementById('connectBtn').onclick = async () => {
+            const accs = await window.ethereum.request({ method: 'eth_requestAccounts' });
+            userAccount = accs[0];
+            document.getElementById('myAddr').innerText = userAccount;
+            document.getElementById('connectionStatus').innerText = "Connected";
+            document.getElementById('connectionStatus').className = "status-badge connected";
+            document.getElementById('lookupAddr').value = userAccount;
+            document.getElementById('regAdmin').value = userAccount; // Default admin
+            refreshState();
+        };
+
+        document.getElementById('refreshBtn').onclick = refreshState;
+
+        async function refreshState() {
+            try {
+                const cid = await fetchAuth("eth_chainId");
+                document.getElementById('chainId').innerText = parseInt(cid, 16);
+                const bh = await fetchAuth("eth_blockNumber");
+                document.getElementById('blockHeight').innerText = parseInt(bh, 16);
+                const stateRes = await fetch(`${RPC_URL}/dashboard/state`);
+                if (stateRes.ok) log('stateDump', JSON.stringify(await stateRes.json(), null, 2));
+            } catch (e) { console.error(e); }
+        }
+
+        async function fetchAuth(method, params = []) {
+            const res = await fetch(RPC_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params })
+            });
+            const j = await res.json();
+            return j.result;
+        }
+
+        // --- TRANSACTIONS ---
+        document.getElementById('sendBtn').onclick = async () => {
+            if (!userAccount) return alert("Connect Wallet first");
+
+            const op = document.getElementById('opType').value;
+            let receiver = "0".repeat(40);
+            let rawAmount = "0";
+            let payloadObj = { opcode: parseInt(op), fee: "0", data: {} };
+
+            try {
+                if (op === '0x02' || op === '0x01' || op === '0x03') {
+                    // Transfer, Mint, Burn
+                    receiver = document.getElementById('txReceiver').value;
+                    rawAmount = toRawAmount(document.getElementById('txAmount').value);
+                    payloadObj.data = { ticker: document.getElementById('txTicker').value };
+                } else if (op === '0x00') {
+                    // Register
+                    receiver = "0".repeat(40); // Usually 0x0
+                    rawAmount = toRawAmount(document.getElementById('regSupply').value);
+                    payloadObj.data = {
+                        name: document.getElementById('regName').value,
+                        symbol: document.getElementById('regSymbol').value,
+                        admin: addrToArray(document.getElementById('regAdmin').value),
+                        initial_supply: "0x" + BigInt(rawAmount).toString(16),
+                        decimals: parseInt(document.getElementById('regDecimals').value)
+                    };
+                } else if (op === '0xFF') {
+                    // Config
+                    receiver = "0".repeat(40);
+                    rawAmount = "0";
+                    payloadObj.data = {};
+                    const minGas = document.getElementById('cfgMinGas').value;
+                    const gasTkn = document.getElementById('cfgGasToken').value;
+                    const threshold = document.getElementById('cfgGovThreshold').value;
+
+                    if (minGas) payloadObj.data.min_gas_price = "0x" + BigInt(toRawAmount(minGas)).toString(16);
+                    if (gasTkn) payloadObj.data.gas_token = gasTkn;
+                    if (threshold) payloadObj.data.governance_threshold = "0x" + BigInt(toRawAmount(threshold)).toString(16);
+                }
+
+                // 1. Get Nonce
+                const nData = await (await fetch(`${RPC_URL}/nonce/${userAccount}`)).json();
+                const nonce = Number(nData.nonce);
+
+                // 2. Encode Payload
+                const payloadStr = JSON.stringify(payloadObj);
+                const payloadBytes = new TextEncoder().encode(payloadStr);
+
+                // 3. Construct Message for Signing
+                const sBytes = addrToBytes(userAccount);
+                const rBytes = addrToBytes(receiver);
+                const vBytes = u256ToBytes(rawAmount);
+                const nBytes = u64ToBytes(nonce);
+
+                const buf = new Uint8Array(20 + 20 + 32 + 8 + payloadBytes.length);
+                buf.set(sBytes, 0); buf.set(rBytes, 20); buf.set(vBytes, 40); buf.set(nBytes, 72); buf.set(payloadBytes, 80);
+
+                const msgHex = "0x" + Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
+
+                // 4. Request Signature
+                const sig = await window.ethereum.request({ method: 'personal_sign', params: [msgHex, userAccount] });
+
+                // 5. Submit
+                const txRequest = {
+                    sender: cleanHex(userAccount),
+                    receiver: cleanHex(receiver),
+                    value: "0x" + BigInt(rawAmount).toString(16),
+                    nonce: nonce,
+                    payload: Array.from(payloadBytes),
+                    signature: cleanHex(sig)
+                };
+
+                const res = await fetch(`${RPC_URL}/transaction`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(txRequest)
+                });
+
+                const resultTxt = await res.text();
+                document.getElementById('txResult').innerHTML = res.ok ? `<span style="color:#4ade80">✅ ${resultTxt}</span>` : `<span style="color:#f87171">❌ ${resultTxt}</span>`;
+                if (res.ok) setTimeout(refreshState, 1500);
+
+            } catch (e) { log('txResult', "Error: " + e.message); }
+        };
+
+        // --- LOOKUPS ---
+        window.checkBalance = async (ticker) => {
+            const who = document.getElementById('lookupAddr').value;
+            if (!who) return;
+            log('lookupResult', `Thinking...`);
+            const res = (ticker === 'GOV') ? await fetchAuth("eth_getBalance", [who, "latest"]) : await fetchAuth("eth_call", [{ to: ticker === 'KRW' ? "0x0000000000000000000000000000000000000001" : "0x0", data: "0x70a08231" + cleanHex(who).padStart(64, '0') }, "latest"]);
+            log('lookupResult', `${ticker}: ${BigInt(res).toString()}`);
+        };
+
+        window.checkNonce = async () => {
+            const who = document.getElementById('lookupAddr').value;
+            const j = await (await fetch(`${RPC_URL}/nonce/${who}`)).json();
+            log('lookupResult', JSON.stringify(j, null, 2));
+        };
+
+    </script>
 </body>
+
 </html>

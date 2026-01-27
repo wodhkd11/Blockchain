@@ -16,6 +16,7 @@ use crate::block::transaction::TransactionData;
 use crate::network::rpc;
 use crate::network::peer::{Peer};
 use crate::network::tasks::discovery;
+use crate::state::statemanager::StateManager;
 
 //현재 노드가 어떤 상태인지를 담고 있다.
 // 현재 개방중인 포트, 내 IP주소, 나와 연결된 노드들의 정보를 담고 있다.
@@ -36,6 +37,7 @@ pub struct Node{
     pub mempool: HashMap<Hash, TransactionData>, // 다음 블록이 생기기 이전까지 트랜잭션 저장 캐시 역할을 맡음. 
     pub global_state: Arc<RwLock<GlobalBalance>>, //블록 생기기 전까지 잔액을 관리함
     pub storage: Arc<Storage>,
+    pub state_manager: Arc<RwLock<StateManager>>, // MPT manager
 
     pub last_block: BlockData,
     pub block_height: u64,

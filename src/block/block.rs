@@ -1,6 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{block::{transaction::ConfirmedTransaction, types::*}, crypto::signature::{self, verify_for_block}};
+use primitive_types::H256;
 use sha3::{Keccak256, Digest};
 
 
@@ -8,6 +9,7 @@ impl BlockData{
     pub fn new(
         prev_block: &BlockData,
         transactions: Vec<ConfirmedTransaction>,
+        state_root: Hash,
         valdiator: Address
     ) -> Self{
         let timestamp = SystemTime::now()
@@ -19,6 +21,7 @@ impl BlockData{
             height: prev_block.header.height + 1,
             prev_block_hash: prev_block.hash,
             merkle_root,
+            state_root,
             timestamp,
             valdiator,
         };
@@ -65,10 +68,12 @@ impl BlockData{
         let prev_block_hash = [0u8; 32];
         let transactions = vec![];
         let merkle_root = [0u8; 32];
+        let state_root = [0u8;32];
         let header = BlockHeader{
             height:0,
             prev_block_hash,
             merkle_root,
+            state_root,
             timestamp,
             valdiator,
         };

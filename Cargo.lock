@@ -459,6 +459,7 @@ dependencies = [
 name = "blockPractice"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "axum",
  "chrono",
  "dotenvy",

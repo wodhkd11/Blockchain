@@ -3,6 +3,7 @@ mod block;
 mod crypto;
 mod exec;
 mod rule;
+mod state;
 
 
 use std::{env, fs, sync::{Arc, OnceLock}};

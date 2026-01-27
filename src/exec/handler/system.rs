@@ -50,20 +50,20 @@ pub fn register_token(
     state.token_metadata.insert(ticker.clone(), new_metadata);
     let gas_tkn = state.config.gas_token.clone();
     {
-        let from_acc = state.get_account_mut(&from, cur_height, db);
+        let from_acc = state.get_account_safe(&from, cur_height, db);
         from_acc.pay_gas(fee, &gas_tkn);
         from_acc.inc_nonce();
     }
     {
-        let to_acc = state.get_account_mut(&to, cur_height, db);
+        let to_acc = state.get_account_safe(&to, cur_height, db);
         to_acc.add_balance(&ticker, value);
     }
 
     println!("[NEW TOKEN] Registered: {ticker} by {}", hex::encode(from));
 
     let mut changed_accounts = HashMap::new();
-    changed_accounts.insert(to, state.get_account_read(&to, cur_height, db));
-    changed_accounts.insert(from, state.get_account_read(&from, cur_height, db));
+    changed_accounts.insert(to, state.get_account_read_safe(&to, cur_height, db).map_err(|e| format!("{:?}", e))?);
+    changed_accounts.insert(from, state.get_account_read_safe(&from, cur_height, db).map_err(|e| format!("{:?}", e))?);
     Ok(StateDiff{
         accounts: changed_accounts,
         token_changed: Some(ticker)

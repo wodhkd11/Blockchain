@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use primitive_types::H256;
+use primitive_types::{H256, U256};
 use rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
@@ -28,6 +28,7 @@ pub struct BlockHeader{
     pub height: u64,
     pub prev_block_hash: Hash,
     pub merkle_root: Hash,
+    pub state_root: Hash,
     pub timestamp: u64,
     pub valdiator: Address,
 }
@@ -47,7 +48,14 @@ pub struct Account{
     pub balance: HashMap<TokenTicker, Balance>, //Symbol, value
     pub nonce: u64,
     pub last_seen_block: u64,
+    pub asset_root: H256,
 }
+impl Account{
+    pub fn new(cur_block: u64) -> Self{
+       Self { balance: HashMap::new(), nonce: 0, last_seen_block: cur_block, asset_root: H256::zero() }
+    }
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalBalance{
@@ -81,6 +89,7 @@ pub struct PrimaryAsset{
     pub amount: Balance,
 }
 
+#[derive(Debug, Clone)]
 pub struct AccountState{
     pub nonce: u64,
     pub primary_assets: Vec<PrimaryAsset>,
@@ -91,15 +100,18 @@ impl Encodable for PrimaryAsset{
     fn rlp_append(&self, s: &mut rlp::RlpStream) {
         s.begin_list(2);
         s.append(&self.ticker);
-        s.append(&self.amount);
+
+        let buf = self.amount.to_big_endian();
+        let start = buf.iter().position(|&x| x != 0).unwrap_or(31);
+        s.append(&&buf[start..]);
     }
 }
 impl Decodable for PrimaryAsset{
     fn decode(rlp: &rlp::Rlp) -> Result<Self, rlp::DecoderError> {
-        Ok(Self{
-            ticker: rlp.val_at(0)?,
-            amount: rlp.val_at(1)?,
-        })
+        let ticker: TokenTicker =  rlp.val_at(0)?;
+        let amount_bytes: Vec<u8> = rlp.val_at(1)?;
+        let amount = U256::from_big_endian(&amount_bytes);
+        Ok(Self{ticker, amount})
     }
 }
 
@@ -113,6 +125,13 @@ impl Encodable for AccountState{
 }
 impl Decodable for AccountState{
     fn decode(rlp: &rlp::Rlp) -> Result<Self, rlp::DecoderError> {
-        Ok(Self { nonce: rlp.val_at(0)?, primary_assets: rlp.list_at(1)?, asset_root: rlp.val_at(2)? })
+        let nonce: u64 = rlp.val_at(0)?;
+        let primary_assets: Vec<PrimaryAsset> = rlp.list_at(1)?;
+        let asset_root_bytes: Vec<u8> = rlp.val_at(2)?;
+        Ok(Self{
+            nonce,
+            primary_assets,
+            asset_root: H256::from_slice(&asset_root_bytes),
+        })
     }
 }

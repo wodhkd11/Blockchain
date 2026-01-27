@@ -3,7 +3,7 @@ use primitive_types::U256;
 use reqwest::Method;
 use serde::Deserialize;
 use serde_json::json;
-use serde_with::serde_as;
+use serde_with::{serde_as, hex::Hex};
 use sha3::{Digest, Keccak256};
 use tower_http::cors::{Any, CorsLayer};
 use std::{collections::HashMap, sync::Arc};
@@ -20,12 +20,14 @@ struct RpcRequest{
 #[serde_as]
 #[derive(Debug, Deserialize)]
 pub struct TransactionRequest{
+    #[serde_as(as = "serde_with::hex::Hex")]
     pub sender: [u8; 20],
+    #[serde_as(as = "serde_with::hex::Hex")]
     pub receiver: [u8; 20],
     pub value: Balance,
     pub nonce: u64,
     pub payload: Vec<u8>,
-    #[serde_as(as = "[_; 65]")]
+    #[serde_as(as = "serde_with::hex::Hex")]
     pub signature: [u8; 65],
 } // after get string, to_hex and do Transaction::New()
 
@@ -203,8 +205,8 @@ async fn handle_tx_submission(
         
         let is_nonce_valid = {
             let global_state= node_state.global_state.read().await;
-            global_state.check_nocne(&tx.sender, tx.nonce, node_state.block_height + 1, storage)
-        };
+            global_state.check_nonce(&tx.sender, tx.nonce, node_state.block_height + 1, storage)
+        }.map_err(|e| StatusCode::BAD_REQUEST)?;
         if !is_nonce_valid{ return Err(StatusCode::BAD_REQUEST); }
         if node_state.mempool.contains_key(&tx_id){ return Err(StatusCode::CONFLICT); }
         node_state.mempool.insert(tx_id, tx.clone());
@@ -220,10 +222,28 @@ async fn get_nonce_handler(
     Path(address): Path<String>,
 ) -> impl IntoResponse{
     let address = hex_to_address(&address);
-    let manager_clone = manager.state.read().await;
-    let storage = &manager_clone.storage;
-    let nonce = manager_clone.global_state.write().await.get_nonce(&address, manager_clone.block_height + 1, storage);
-    Json(nonce)
+    let node_state = manager.state.read().await;
+    let storage = &node_state.storage;
+
+    let mut global_state = node_state.global_state.write().await;
+    match global_state.get_nonce_safe(&address, node_state.block_height+1, storage){
+        Ok(nonce) => {
+            Json(json!({
+                "address": address,
+                "nonce": nonce,
+                "nocne_hex": format!("0x{:?}", nonce)
+            })).into_response()
+        },
+        Err(e) => {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Failed to get nonce",
+                    "details": format!("{:?}", e)
+                }))
+            ).into_response()
+        }
+    }
 }
 
 fn hex_to_address(hex_str: &String) -> [u8;20]{
@@ -259,7 +279,9 @@ impl TransactionRequest{
         v.extend_from_slice(&value_bytes);
         v.extend_from_slice(&self.nonce.to_be_bytes());
         v.extend_from_slice(&self.payload);
-
+        println!("[DEBUG] Backend Message Bytes: 0x{}", hex::encode(&v));
+        println!("[DEBUG] Sender: 0x{}", hex::encode(&self.sender));
+        println!("[DEBUG] Signature: 0x{}", hex::encode(&self.signature));
         crate::crypto::signature::verify(self.sender, &self.signature, &v)
     }
 }

@@ -26,7 +26,7 @@ pub fn config_update(
 
     let mut changed_accounts = std::collections::HashMap::new();
     {
-        let from_acc = state.get_account_mut(&from, cur_height, db);
+        let from_acc = state.get_account_safe(&from, cur_height, db);
         if from_acc.balance.get(&gas_tkn).unwrap_or(&Balance::zero()) < &Balance::from(gas_fee) { return Err("INSUFFICIENT_GAS_FEE".into()); }
         from_acc.pay_gas(Balance::from(gas_fee), &gas_tkn)?;
         from_acc.inc_nonce();

@@ -1,4 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, sync::Arc};
+
+use eth_trie::DB as TrieDB;
 
 use rocksdb::{DB, IteratorMode, Options, WriteBatch};
 
@@ -15,14 +17,43 @@ const KEY_LAST_BLOCK: &[u8] = b"last_block";
 
 
 pub struct Storage{
-    db: DB,
+    pub db: Arc<DB>,
 }
+
+#[derive(Debug)]
+pub struct TrieError(rocksdb::Error);
+impl std::fmt::Display for TrieError{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result{
+        write!(f, "Trie DB Error: {}", self.0)
+    }
+}
+impl std::error::Error for TrieError{}
+
+#[derive(Clone)]
+pub struct TrieDb{pub inner: Arc<DB>,}
+
+impl TrieDB for TrieDb{
+    type Error = TrieError;
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>{
+        self.inner.get(key).map_err(TrieError)
+    }
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), Self::Error> {
+        self.inner.put(key, value).map_err(TrieError)
+    }
+    fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
+        self.inner.delete(key).map_err(TrieError)
+    }
+    fn flush(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
 
 impl Storage{
     pub fn new(path: &str) -> Self{
         let mut opts = Options::default();
         opts.create_if_missing(true);
-        let db = DB::open(&opts, path).expect("DB open failed");
+        let db = Arc::new(DB::open(&opts, path).expect("DB open failed"));
         Self {db}
     }
 
@@ -36,12 +67,7 @@ impl Storage{
         key.extend_from_slice(&height.to_be_bytes());
         key
     }
-    fn acc_key(addr: &Address) -> Vec<u8> {
-        let mut key = vec![PREFIX_ACCOUNT];
-        key.extend_from_slice(addr);
-        key
-    }
-    fn staker_key(addr: &Address) -> Vec<u8>{
+     fn staker_key(addr: &Address) -> Vec<u8>{
         let mut key = vec![PREFIX_STAKER];
         key.extend_from_slice(addr);
         key
@@ -52,14 +78,55 @@ impl Storage{
         key
     }
 
+    //flat db 사용해서 mpt 이외에 최신 상태를 저장함.
+    pub fn get_account_flat(&self, addr: &Address) -> Option<Account>{
+        let mut key = vec![PREFIX_ACCOUNT];
+        key.extend_from_slice(addr);
+        self.db.get(key).ok().flatten().and_then(|bytes| postcard::from_bytes(&bytes).ok())
+    }
+    
+
+
     pub fn get_global_snapshot(&self) -> Option<GlobalBalance>{
-        let data = self.db.get(vec![PREFIX_GLOBAL_STATE]).ok().flatten()?;
-        postcard::from_bytes(&data).ok()
+        self.db.get(b"global_state_snapshot")
+            .ok()
+            .flatten()
+            .and_then(|data| postcard::from_bytes(&data).ok())
     }
 
-    pub fn put_staker(&self, addr: &Address, amount: u64){
+    pub fn get_block(&self, hash: &Hash) -> Option<BlockData>{
+        let key = Self::blk_key(hash);
+        self.db.get(key)
+            .ok()
+            .flatten()
+            .and_then(|data| postcard::from_bytes(&data).ok())
+    }
+
+    pub fn get_latest_block(&self) -> Option<BlockData> {
+        let last_hash_bytes = self.db.get(KEY_LAST_BLOCK).ok().flatten()?;
+        let mut last_hash = [0u8;32];
+        if last_hash_bytes.len() == 32{
+            last_hash.copy_from_slice(&last_hash_bytes);
+            self.get_block(&last_hash)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_hash_by_height(&self, height: u64) -> Option<Hash>{
+        let key = Self::idx_key(height);
+        let bytes = self.db.get(key).ok().flatten()?;
+        let mut hash = [0u8;32];
+        if bytes.len() == 32{
+            hash.copy_from_slice(&bytes);
+            Some(hash)
+        } else { None }
+    }
+
+
+    pub fn put_staker(&self, addr: &Address, amount: u64) -> Result<(), rocksdb::Error>{
         let key = Self::staker_key(addr);
-        self.db.put(key, amount.to_be_bytes()).expect("Staker Save Failed");
+        self.db.put(key, amount.to_be_bytes())
     }
     pub fn get_all_stakers(&self) -> (Vec<(Address, u64)>, u64){
         let mut stakers = Vec::new();
@@ -81,36 +148,9 @@ impl Storage{
         (stakers, total_stake)
     }
 
-    pub fn get_account(&self, address: &Address, cur_height: u64) -> Account{
-        let key = Self::acc_key(address);
-        self.db.get(key).ok().flatten()
-            .and_then(|bytes| postcard::from_bytes(&bytes).ok())
-            .unwrap_or(Account { balance: HashMap::new() , nonce: 0u64, last_seen_block: cur_height })
-    }
-    pub fn get_block(&self, hash: &Hash) -> Option<BlockData>{
-        let key = Self::blk_key(hash);
-        let data = self.db.get(key).ok().flatten()?;
-        postcard::from_bytes(&data).ok()
-    }
-    pub fn get_block_by_height(&self, height: u64) -> Option<BlockData>{
-        let hash = self.get_hash_by_height(height)?;
-        self.get_block(&hash)
-    }
-    pub fn get_hash_by_height(&self, height:u64) -> Option<Hash>{
-        let key = Self::idx_key(height);
-        let bytes = self.db.get(key).ok().flatten()?;
-        let mut hash = [0u8;32];
-        hash.copy_from_slice(&bytes);
-        Some(hash)
-    }
-    pub fn get_latest_block(&self) -> Option<BlockData>{
-        let last_hash_bytes = self.db.get(KEY_LAST_BLOCK).ok().flatten()?;
-        let mut last_hash = [0u8;32];
-        last_hash.copy_from_slice(&last_hash_bytes);
-        self.get_block(&last_hash)
-    }
 
-    pub fn commit_block(&self, block: &BlockData, state_update: &HashMap<Address, Account>, updated_tokens: &HashSet<TokenTicker>, global_state: &GlobalBalance){
+    pub fn commit_block(&self, block: &BlockData, state_update: &HashMap<Address, Account>, updated_tokens: &HashSet<TokenTicker>, global_state: &GlobalBalance)
+     -> Result<(), Box<dyn std::error::Error>>{
         let mut batch = WriteBatch::default();
         let height = block.header.height;
         for (idx, ctx) in block.body.iter().enumerate(){
@@ -121,56 +161,45 @@ impl Storage{
                 index: idx as u32,
                 status: 1,
             };
-            let receipt_bytes = postcard::to_allocvec(&receipt).expect("Transaction Pointor Serialize Failed");
+            let receipt_bytes = postcard::to_allocvec(&receipt)?;
             let mut key = vec![PREFIX_POINTER];
             key.extend_from_slice(&ctx.hash);
-            batch.put(key, receipt_bytes);
+            batch.put(key,receipt_bytes);
         }
 
-        let blk_key = Self::blk_key(&block.hash);
-        let blk_bytes = postcard::to_allocvec(block).expect("Block Serialize Failed");
-        batch.put(blk_key, blk_bytes);
-        
-        
-        //height - block hash 
-        let idx_key = Self::idx_key(height);
-        batch.put(idx_key, block.hash);
- 
-        //KEY_LAST_BLOCK은 최신의 블록 해시 하나의 값만 가짐
+        let blk_bytes = postcard::to_allocvec(block)?;
+        batch.put(Self::blk_key(&block.hash), blk_bytes);
+        batch.put(Self::idx_key(height), block.hash);
         batch.put(KEY_LAST_BLOCK, block.hash);
 
-        for (addr, acc) in state_update{
-            let acc_key = Self::acc_key(addr);
-            let acc_bytes = postcard::to_allocvec(acc).expect("Account Serialize Failed");
-            batch.put(acc_key, acc_bytes);
-
-            let s_key = Self::staker_key(addr);
-            if let Some(&gov_amount) = global_state.gov_shares.get(addr){
-                if gov_amount > Balance::zero(){
-                    let bytes: [u8; 32] = gov_amount.to_big_endian();
-                    batch.put(s_key, bytes);
-                } else{
-                    batch.delete(s_key);
-                }
-            }
-        }
         for ticker in updated_tokens{
-            if let Some(_info) = global_state.token_metadata.get(ticker){
+            if let Some(info) = global_state.token_metadata.get(ticker) {
                 let mut t_key = vec![PREFIX_TOKEN];
                 t_key.extend_from_slice(ticker.as_bytes());
-                let t_bytes = postcard::to_allocvec(_info).expect("Token Serialize Failed");
-                batch.put(t_key, t_bytes);
+                batch.put(t_key, postcard::to_allocvec(info)?);
             }
         }
 
-        if height == 0 || height % 10 == 0 {
-            let gs_bytes = postcard::to_allocvec(global_state).expect("Globalstate Serialize Failed");
+        for (addr, acc) in state_update{
+            let mut key = vec![PREFIX_ACCOUNT];
+            key.extend_from_slice(addr);
+            let bytes = postcard::to_allocvec(acc)?;
+            batch.put(key, bytes);
+        }
+
+        let gs_bytes = postcard::to_allocvec(global_state)?;
+        batch.put(b"global_state_snapshot", &gs_bytes);
+
+        if height % 10 == 0{
             let mut history_key = vec![PREFIX_GLOBAL_STATE];
             history_key.extend_from_slice(&height.to_be_bytes());
-            batch.put(history_key, gs_bytes);
+            batch.put(history_key, &gs_bytes);
             batch.put(b"latest_snapshot_height", height.to_be_bytes());
         }
-        self.db.write(batch).expect("Block Commit Failed");
+
+        self.db.write(batch)?;
+        Ok(())
+
     }
 
     pub fn is_empty(&self) -> bool{
@@ -178,25 +207,5 @@ impl Storage{
     }
 
 
-
-
-    // for sync: 동기화 요청 시 현재 전체 상태를 압축해서 보내주는 역할을 함.
-    pub fn get_full_state_snapshot(&self) -> HashMap<Address, Account>{
-        let mut full_state = HashMap::new();
-        let mode = IteratorMode::Start;
-        let iter = self.db.iterator(mode);
-        for item in iter{
-            if let Ok((key, value)) = item{
-                if key.starts_with(&[PREFIX_ACCOUNT]){
-                    let mut addr = [0u8; 20];
-                    addr.copy_from_slice(&key[1..21]);
-                    if let Ok(acc) = postcard::from_bytes::<Account>(&value){
-                        full_state.insert(addr, acc);
-                    }
-                }else { break; }
-            }
-        }
-        full_state
-    }
     
 }

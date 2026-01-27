@@ -9,6 +9,7 @@ pub struct NetworkConfig{
     pub gas_token: String,
     pub governance_threshold: Balance,
     pub gov_token: String,
+    pub primary_tokens: Vec<Balance>,
     pub last_updated_height: u64,
 }
 
@@ -20,6 +21,7 @@ impl NetworkConfig{
             gas_token: "KRW".into(),
             governance_threshold: decimals_pow,
             gov_token: "GOV".into(),
+            primary_tokens: Vec::new(),
             last_updated_height: 0,
             
         }
